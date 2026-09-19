@@ -222,6 +222,46 @@ than the phone attempting direct delivery. See the [Linq API overview](https://d
 
 ---
 
+## Backend: care-alert gateway (FastAPI + Linq)
+
+The APK never holds the Linq key. A small FastAPI gateway (`backend/`) owns the
+Linq integration token, enforces a recipient allowlist, dedupes retries by
+`alert_id`, and sends the caregiver message via iMessage/RCS/SMS. Full docs:
+`backend/README.md`.
+
+### Live gateway (HackMIT demo)
+
+- Public URL: `https://work.tail043976.ts.net` — served through **Tailscale
+  Funnel**, so it is reachable by anyone on the public internet (no Tailscale
+  account needed).
+- Alert endpoint: `POST /v1/stroke-alerts`
+- Auth: `X-Alert-Gateway-Token` header. The shared token is **not committed** —
+  ask the team for the current one (it's a demo secret; rotate it if it leaks).
+- Recipient allowlist is `*`, so each user sets their own trusted contact in-app
+  without any server change.
+
+In the app, **Settings → Care alerts (Linq)**:
+
+- Gateway URL: `https://work.tail043976.ts.net/v1/stroke-alerts`
+- Gateway token: the shared demo token
+- Trusted contact: your phone (E.164, e.g. `+15551234567`)
+
+### Run the backend yourself
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env        # set LINQ_API_TOKEN, LINQ_FROM_NUMBER, GATEWAY_TOKEN, ALLOWED_RECIPIENTS
+.venv/bin/uvicorn gateway.main:app --host 127.0.0.1 --port 8000
+```
+
+On the demo server it runs as a **user systemd service**
+(`strokesense-gateway`) bound to `127.0.0.1:8000` and fronted by
+`tailscale funnel --bg 8000`. See `backend/deploy/install.sh`.
+
+---
+
 ## Rename the app
 
 The display name and application id live in `gradle.properties`:

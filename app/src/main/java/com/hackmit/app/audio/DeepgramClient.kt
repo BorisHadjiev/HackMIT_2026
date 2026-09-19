@@ -126,8 +126,9 @@ class DeepgramClient(
     }
 
     companion object {
-        const val DEFAULT_ENDPOINT: String =
-            "wss://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true" +
+        const val DEFAULT_QUERY: String =
+            "model=nova-2&language=en&smart_format=true" +
                 "&interim_results=true&encoding=linear16&sample_rate=16000&channels=1"
+        const val DEFAULT_ENDPOINT: String = "wss://api.deepgram.com/v1/listen?$DEFAULT_QUERY"
     }
 }

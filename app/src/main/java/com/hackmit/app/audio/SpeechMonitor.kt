@@ -88,8 +88,8 @@ class SpeechMonitor(
         baseline = baselineStore.load()
         val sensitivity = settings.alertSensitivity.first()
         detector = baseline?.let { SlurDetector(it, sensitivity) }
-        val apiKey = settings.deepgramKey.first()
-        begin(apiKey)
+        val route = DeepgramRouter.forStream(settings)
+        begin(route.token, route.endpoint)
     }
 
     fun stopMonitoring() {
@@ -102,8 +102,8 @@ class SpeechMonitor(
         if (running) end()
         baselineSamples = mutableListOf()
         calibrating = true
-        val apiKey = settings.deepgramKey.first()
-        begin(apiKey)
+        val route = DeepgramRouter.forStream(settings)
+        begin(route.token, route.endpoint)
         delay(durationMs)
         calibrating = false
         val samples = baselineSamples ?: emptyList()
@@ -118,7 +118,7 @@ class SpeechMonitor(
         return profile
     }
 
-    private fun begin(apiKey: String) {
+    private fun begin(apiKey: String, endpoint: String = DeepgramStream.DEFAULT_ENDPOINT) {
         running = true
         vad.reset()
         extractor.reset()
@@ -132,7 +132,7 @@ class SpeechMonitor(
         _state.value = MonitorState(running = true, deepgramStatus = "Starting")
 
         if (apiKey.isNotBlank()) {
-            val stream = DeepgramStream(apiKey)
+            val stream = DeepgramStream(apiKey, endpoint)
             deepgram = stream
             stream.start(scope)
             eventJob = scope.launch {

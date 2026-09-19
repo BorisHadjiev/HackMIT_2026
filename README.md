@@ -239,6 +239,10 @@ Linq integration token, enforces a recipient allowlist, dedupes retries by
   ask the team for the current one (it's a demo secret; rotate it if it leaks).
 - Recipient allowlist is `*`, so each user sets their own trusted contact in-app
   without any server change.
+- **Deepgram proxy:** the app streams audio to
+  `wss://work.tail043976.ts.net/v1/deepgram/stream` (token-auth) by default, so
+  the Deepgram key stays on the server. Override per-device via
+  `local.properties` → `DEEPGRAM_PROXY_URL`.
 
 In the app, **Settings → Care alerts (Linq)**:
 

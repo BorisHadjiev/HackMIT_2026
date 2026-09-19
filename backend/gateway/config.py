@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Gateway configuration, loaded from environment / .env.
 
-    The Linq integration token is intentionally server-side only. It must never
-    be shipped in the Android APK.
+    The Linq integration token and Deepgram API key are intentionally
+    server-side only. They must never ship in the Android APK.
     """
 
     model_config = SettingsConfigDict(
@@ -22,11 +22,26 @@ class Settings(BaseSettings):
     linq_from_number: str = ""
     linq_base_url: str = "https://api.linqapp.com"
 
-    # Shared secret the app sends as X-Alert-Gateway-Token. Empty disables the check.
+    # Deepgram: the key stays here; the APK talks to /v1/deepgram/stream instead.
+    deepgram_api_key: str = ""
+    deepgram_base_url: str = "https://api.deepgram.com/v1/listen"
+
+    # Public base used when registering the Linq webhook (e.g. https://work.tail043976.ts.net)
+    linq_public_base_url: str = ""
+
+    # Shared secret the app sends as X-Alert-Gateway-Token (and as the Deepgram
+    # proxy Authorization token). Empty disables the checks.
     gateway_token: str = ""
 
-    # Comma-separated E.164 allowlist. Empty rejects every recipient.
+    # Comma-separated E.164 allowlist. "*" allows any recipient the app sends.
+    # Empty rejects every recipient.
     allowed_recipients: str = ""
+
+    # SQLite file for idempotency + alert audit + webhook events.
+    db_path: str = "strokesense.db"
+
+    # Optional shared secret for verifying Linq webhook callbacks.
+    webhook_secret: str = ""
 
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
@@ -44,6 +59,10 @@ class Settings(BaseSettings):
     @property
     def linq_configured(self) -> bool:
         return bool(self.linq_api_token and self.linq_from_number)
+
+    @property
+    def deepgram_configured(self) -> bool:
+        return bool(self.deepgram_api_key)
 
 
 @lru_cache

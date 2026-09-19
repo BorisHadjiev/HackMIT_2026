@@ -40,4 +40,7 @@ class AlertResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     linq_configured: bool
+    deepgram_configured: bool
     recipients_configured: bool
+    alerts_recorded: int = 0
+    webhook_events: int = 0

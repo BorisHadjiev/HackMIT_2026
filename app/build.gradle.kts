@@ -17,6 +17,15 @@ val deepgramKey: String = runCatching {
     }.getProperty("DEEPGRAM_API_KEY").orEmpty()
 }.getOrDefault("")
 
+// Deepgram proxy base URL: local.properties override wins, else gradle.properties.
+val deepgramProxyUrl: String = runCatching {
+    Properties().apply {
+        rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }.getProperty("DEEPGRAM_PROXY_URL").orEmpty()
+}.getOrDefault("").ifBlank {
+    providers.gradleProperty("DEEPGRAM_PROXY_URL").getOrElse("")
+}
+
 android {
     namespace = "com.hackmit.app"
     compileSdk = 35
@@ -32,6 +41,7 @@ android {
         // Single source of truth for the visible app name (see gradle.properties).
         resValue("string", "app_name", appName)
         buildConfigField("String", "DEEPGRAM_API_KEY", "\"$deepgramKey\"")
+        buildConfigField("String", "DEEPGRAM_PROXY_URL", "\"$deepgramProxyUrl\"")
     }
 
     buildTypes {

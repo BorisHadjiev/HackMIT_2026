@@ -25,6 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.hackmit.app.alert.AlertConfig
+import com.hackmit.app.audio.DeepgramClient
+import com.hackmit.app.audio.DeepgramRouter
 import com.hackmit.app.audio.SpeechMetrics
 import com.hackmit.app.audio.SpeechSession
 import com.hackmit.app.domain.Metric
@@ -68,6 +71,13 @@ private fun mockSpeechMetrics(abnormal: Boolean): SpeechMetrics = if (abnormal) 
 fun SpeechCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
     val permission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
     val apiKey by vm.settingsStore.deepgramKey.collectAsState(initial = "")
+    val proxyUrl by vm.settingsStore.deepgramProxyUrl.collectAsState(initial = "")
+    val alertConfig by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
+    val gatewayToken = alertConfig.gatewayToken
+    val useProxy = DeepgramRouter.isProxy(proxyUrl, gatewayToken)
+    val sessionKey = if (useProxy) gatewayToken else apiKey
+    val sessionEndpoint =
+        if (useProxy) "$proxyUrl?${DeepgramClient.DEFAULT_QUERY}" else DeepgramClient.DEFAULT_ENDPOINT
 
     var recording by remember { mutableStateOf(false) }
     var live by remember { mutableStateOf(false) }
@@ -167,7 +177,8 @@ fun SpeechCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
                         nav.navigate(Routes.SPEECH_TEST)
                     } else {
                         val newSession = SpeechSession(
-                            apiKey = apiKey,
+                            apiKey = sessionKey,
+                            endpoint = sessionEndpoint,
                             onTranscript = { transcript = it },
                             onStatus = { status = it },
                         )
@@ -182,10 +193,11 @@ fun SpeechCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
             }
 
             Text(
-                if (apiKey.isBlank()) {
-                    "Demo mode: add a Deepgram key in Settings for real transcription."
-                } else {
-                    "Streaming microphone audio to Deepgram."
+                when {
+                    !useProxy && apiKey.isBlank() ->
+                        "Demo mode: add a Deepgram key in Settings for real transcription."
+                    useProxy -> "Streaming microphone audio through the StrokeSense gateway."
+                    else -> "Streaming microphone audio to Deepgram."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -198,6 +210,13 @@ fun SpeechCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
 fun SpeechTestScreen(vm: AssessmentViewModel, nav: NavController) {
     val permission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
     val apiKey by vm.settingsStore.deepgramKey.collectAsState(initial = "")
+    val proxyUrl by vm.settingsStore.deepgramProxyUrl.collectAsState(initial = "")
+    val alertConfig by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
+    val gatewayToken = alertConfig.gatewayToken
+    val useProxy = DeepgramRouter.isProxy(proxyUrl, gatewayToken)
+    val sessionKey = if (useProxy) gatewayToken else apiKey
+    val sessionEndpoint =
+        if (useProxy) "$proxyUrl?${DeepgramClient.DEFAULT_QUERY}" else DeepgramClient.DEFAULT_ENDPOINT
 
     var abnormal by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
@@ -335,7 +354,8 @@ fun SpeechTestScreen(vm: AssessmentViewModel, nav: NavController) {
                         nav.navigate(Routes.MOTOR_CALIB)
                     } else {
                         val newSession = SpeechSession(
-                            apiKey = apiKey,
+                            apiKey = sessionKey,
+                            endpoint = sessionEndpoint,
                             onTranscript = { transcript = it },
                             onStatus = { status = it },
                         )

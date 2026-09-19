@@ -8,6 +8,7 @@ package com.hackmit.app.audio
  */
 class SpeechSession(
     private val apiKey: String,
+    private val endpoint: String = DeepgramClient.DEFAULT_ENDPOINT,
     private val onTranscript: (String) -> Unit = {},
     private val onStatus: (String) -> Unit = {},
 ) {
@@ -26,7 +27,7 @@ class SpeechSession(
             onStatus("Demo mode: no Deepgram key set (Settings)")
             return false
         }
-        val client = DeepgramClient(apiKey)
+        val client = DeepgramClient(apiKey, endpoint)
         deepgram = client
         client.connect(
             onTranscript = { update ->

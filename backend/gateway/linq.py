@@ -52,3 +52,27 @@ class LinqClient:
         message = data.get("chat_messages") or {}
         message_id = message.get("id")
         return f"linq:{chat_id}:{message_id}"
+
+    async def register_webhook(self, webhook_url: str) -> dict:
+        """Creates a Linq webhook subscription pointing at our receiver."""
+        payload = {
+            "webhook_subscription": {
+                "webhook_url": webhook_url,
+                "events": ["message.received", "message.sent"],
+                "version": 2,
+                "active": True,
+            }
+        }
+        response = await self._client.post(
+            f"{self._settings.linq_base_url}/api/partner/v2/webhook_subscriptions",
+            headers={
+                "X-LINQ-INTEGRATION-TOKEN": self._settings.linq_api_token,
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        if response.status_code not in (200, 201):
+            raise LinqError(
+                f"linq webhook registration returned {response.status_code}: {response.text[:200]}"
+            )
+        return response.json()

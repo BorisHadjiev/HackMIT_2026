@@ -39,6 +39,7 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val scope = rememberCoroutineScope()
 
     val storedKey by vm.settingsStore.deepgramKey.collectAsState(initial = "")
+    val storedProxy by vm.settingsStore.deepgramProxyUrl.collectAsState(initial = "")
     val storedMock by vm.settingsStore.mockSensors.collectAsState(initial = true)
     val storedMac by vm.settingsStore.sensorMac.collectAsState(initial = "")
     val storedContact by vm.settingsStore.emergencyContact.collectAsState(initial = "")
@@ -46,6 +47,7 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val storedAlertConfig by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
 
     var keyInput by remember(storedKey) { mutableStateOf(storedKey) }
+    var proxyInput by remember(storedProxy) { mutableStateOf(storedProxy) }
     var mock by remember(storedMock) { mutableStateOf(storedMock) }
     var address by remember(storedMac) { mutableStateOf(storedMac) }
     var contact by remember(storedContact) { mutableStateOf(storedContact) }
@@ -78,19 +80,33 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                     OutlinedTextField(
                         value = keyInput,
                         onValueChange = { keyInput = it },
-                        label = { Text("API key") },
+                        label = { Text("API key (direct mode)") },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    OutlinedTextField(
+                        value = proxyInput,
+                        onValueChange = { proxyInput = it },
+                        label = { Text("Proxy URL (backend)") },
+                        placeholder = { Text("wss://host/v1/deepgram/stream") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Button(
-                        onClick = { scope.launch { vm.settingsStore.setDeepgramKey(keyInput) } },
+                        onClick = {
+                            scope.launch {
+                                vm.settingsStore.setDeepgramKey(keyInput)
+                                vm.settingsStore.setDeepgramProxyUrl(proxyInput)
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Save key")
+                        Text("Save")
                     }
                     Text(
-                        "In production, proxy audio through a backend so the key never ships in the APK.",
+                        "Set a proxy URL (plus a gateway token in Care alerts) to stream audio " +
+                            "through the backend so the Deepgram key never ships in the APK.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

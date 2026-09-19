@@ -209,9 +209,10 @@ class DeepgramStream(
     companion object {
         private const val TAG = "DG"
         const val KEEPALIVE_MS = 5000L
-        const val DEFAULT_ENDPOINT: String =
-            "wss://api.deepgram.com/v1/listen?model=nova-3&language=en&smart_format=true" +
+        const val DEFAULT_QUERY: String =
+            "model=nova-3&language=en&smart_format=true" +
                 "&interim_results=true&filler_words=true&encoding=linear16&sample_rate=16000" +
                 "&channels=1&endpointing=300&utterance_end_ms=1000&vad_events=true"
+        const val DEFAULT_ENDPOINT: String = "wss://api.deepgram.com/v1/listen?$DEFAULT_QUERY"
     }
 }

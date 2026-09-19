@@ -16,6 +16,7 @@ private val Context.dataStore by preferencesDataStore(name = "stroke_settings")
 class SettingsStore(private val context: Context) {
 
     private val keyDeepgram = stringPreferencesKey("deepgram_api_key")
+    private val keyDeepgramProxy = stringPreferencesKey("deepgram_proxy_url")
     private val keyMock = booleanPreferencesKey("mock_sensors")
     private val keyMac = stringPreferencesKey("sensor_mac")
     private val keyTransport = stringPreferencesKey("sensor_transport")
@@ -33,6 +34,9 @@ class SettingsStore(private val context: Context) {
 
     val deepgramKey: Flow<String> = context.dataStore.data.map {
         it[keyDeepgram]?.takeIf { k -> k.isNotBlank() } ?: BuildConfig.DEEPGRAM_API_KEY
+    }
+    val deepgramProxyUrl: Flow<String> = context.dataStore.data.map {
+        it[keyDeepgramProxy]?.takeIf(String::isNotBlank) ?: BuildConfig.DEEPGRAM_PROXY_URL
     }
     val mockSensors: Flow<Boolean> = context.dataStore.data.map { it[keyMock] ?: true }
     val sensorMac: Flow<String> = context.dataStore.data.map { it[keyMac].orEmpty() }
@@ -55,6 +59,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setDeepgramKey(value: String) {
         context.dataStore.edit { it[keyDeepgram] = value.trim() }
+    }
+
+    suspend fun setDeepgramProxyUrl(value: String) {
+        context.dataStore.edit { it[keyDeepgramProxy] = value.trim() }
     }
 
     suspend fun setMockSensors(value: Boolean) {

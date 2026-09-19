@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.hackmit.app.BuildConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -17,7 +18,9 @@ class SettingsStore(private val context: Context) {
     private val keyMac = stringPreferencesKey("sensor_mac")
     private val keyTransport = stringPreferencesKey("sensor_transport")
 
-    val deepgramKey: Flow<String> = context.dataStore.data.map { it[keyDeepgram].orEmpty() }
+    val deepgramKey: Flow<String> = context.dataStore.data.map {
+        it[keyDeepgram]?.takeIf { k -> k.isNotBlank() } ?: BuildConfig.DEEPGRAM_API_KEY
+    }
     val mockSensors: Flow<Boolean> = context.dataStore.data.map { it[keyMock] ?: true }
     val sensorMac: Flow<String> = context.dataStore.data.map { it[keyMac].orEmpty() }
     val sensorTransport: Flow<String> = context.dataStore.data.map { it[keyTransport] ?: "MOCK" }

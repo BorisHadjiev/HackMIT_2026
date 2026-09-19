@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -8,6 +9,13 @@ plugins {
 
 val appName: String = providers.gradleProperty("APP_NAME").getOrElse("StrokeSense")
 val appId: String = providers.gradleProperty("APP_ID").getOrElse("com.hackmit.strokesense")
+
+// Optional local-only Deepgram key from local.properties (gitignored). Never commit it.
+val deepgramKey: String = runCatching {
+    Properties().apply {
+        rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }.getProperty("DEEPGRAM_API_KEY").orEmpty()
+}.getOrDefault("")
 
 android {
     namespace = "com.hackmit.app"
@@ -23,6 +31,7 @@ android {
 
         // Single source of truth for the visible app name (see gradle.properties).
         resValue("string", "app_name", appName)
+        buildConfigField("String", "DEEPGRAM_API_KEY", "\"$deepgramKey\"")
     }
 
     buildTypes {

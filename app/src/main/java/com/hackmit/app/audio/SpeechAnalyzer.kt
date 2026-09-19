@@ -40,12 +40,14 @@ class SpeechAnalyzer(private val baselineWpm: Float? = null) {
     }
 
     fun onTranscript(update: TranscriptUpdate) {
+        // Only final segments count, otherwise interim results double-count words.
+        if (!update.isFinal) return
+
         val now = update.timestampMs
-        if (update.isFinal) {
-            val gap = now - lastFinalMs
-            if (lastFinalMs != 0L && gap > 1200) longPauses++
-            lastFinalMs = now
-        }
+        val gap = now - lastFinalMs
+        if (lastFinalMs != 0L && gap > 1200) longPauses++
+        lastFinalMs = now
+
         words += update.wordCount
         if (update.confidence > 0f) {
             confidenceSum += update.confidence

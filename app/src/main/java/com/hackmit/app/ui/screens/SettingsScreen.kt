@@ -40,10 +40,14 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val storedKey by vm.settingsStore.deepgramKey.collectAsState(initial = "")
     val storedMock by vm.settingsStore.mockSensors.collectAsState(initial = true)
     val storedMac by vm.settingsStore.sensorMac.collectAsState(initial = "")
+    val storedContact by vm.settingsStore.emergencyContact.collectAsState(initial = "")
+    val storedSms by vm.settingsStore.alertSmsEnabled.collectAsState(initial = false)
 
     var keyInput by remember(storedKey) { mutableStateOf(storedKey) }
     var mock by remember(storedMock) { mutableStateOf(storedMock) }
     var address by remember(storedMac) { mutableStateOf(storedMac) }
+    var contact by remember(storedContact) { mutableStateOf(storedContact) }
+    var sms by remember(storedSms) { mutableStateOf(storedSms) }
     var transport by remember { mutableStateOf(SensorTransport.MOCK) }
 
     ScreenScaffold(title = "Settings", onBack = { nav.popBackStack() }) { padding ->
@@ -142,6 +146,52 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                     InfoRow("App", BuildConfig.APPLICATION_ID)
                     InfoRow("Version", BuildConfig.VERSION_NAME)
                     InfoRow("Build type", BuildConfig.BUILD_TYPE)
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Emergency alerts", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = contact,
+                        onValueChange = { contact = it },
+                        label = { Text("Emergency contact number") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Text contact on alert")
+                        Switch(
+                            checked = sms,
+                            onCheckedChange = {
+                                sms = it
+                                scope.launch { vm.settingsStore.setAlertSmsEnabled(it) }
+                            },
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                vm.settingsStore.setEmergencyContact(contact)
+                                vm.settingsStore.setAlertSmsEnabled(sms)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Save alert settings")
+                    }
+                    Text(
+                        "On a high-confidence alert you get a 15s window to cancel before the text is sent.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

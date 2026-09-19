@@ -26,7 +26,7 @@ class AudioCapture(private val onChunk: (ByteArray) -> Unit) {
         if (minBuffer <= 0) return false
 
         val recorder = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -62,5 +62,27 @@ class AudioCapture(private val onChunk: (ByteArray) -> Unit) {
 
     companion object {
         const val SAMPLE_RATE = 16_000
+
+        /** Little-endian PCM16 bytes to shorts. */
+        fun toShorts(bytes: ByteArray): ShortArray {
+            val out = ShortArray(bytes.size / 2)
+            for (i in out.indices) {
+                val lo = bytes[i * 2].toInt() and 0xFF
+                val hi = bytes[i * 2 + 1].toInt()
+                out[i] = ((hi shl 8) or lo).toShort()
+            }
+            return out
+        }
+
+        /** Shorts to little-endian PCM16 bytes. */
+        fun toBytes(samples: ShortArray): ByteArray {
+            val out = ByteArray(samples.size * 2)
+            for (i in samples.indices) {
+                val v = samples[i].toInt()
+                out[i * 2] = (v and 0xFF).toByte()
+                out[i * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+            }
+            return out
+        }
     }
 }

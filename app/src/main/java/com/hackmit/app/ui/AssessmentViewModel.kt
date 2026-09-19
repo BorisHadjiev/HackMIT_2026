@@ -21,6 +21,9 @@ class AssessmentViewModel(private val container: AppContainer) : ViewModel() {
 
     val sensorRepository get() = container.sensorRepository
     val settingsStore get() = container.settingsStore
+    val speechMonitor get() = container.speechMonitor
+    val alertManager get() = container.alertManager
+    val baselineStore get() = container.baselineStore
 
     var results by mutableStateOf<Map<ModuleType, ModuleResult>>(emptyMap())
         private set

@@ -1,0 +1,282 @@
+package com.hackmit.app.ui.screens
+
+import android.Manifest
+import android.os.Build
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import com.hackmit.app.domain.AlertLevel
+import com.hackmit.app.ui.AssessmentViewModel
+import com.hackmit.app.ui.Routes
+import com.hackmit.app.ui.components.InfoRow
+import com.hackmit.app.ui.components.ScoreBar
+import com.hackmit.app.ui.components.ScreenScaffold
+import com.hackmit.app.ui.components.severityColor
+import com.hackmit.app.ui.components.rememberPermissionState
+import kotlinx.coroutines.launch
+
+@Composable
+fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
+    val scope = rememberCoroutineScope()
+    val state by vm.speechMonitor.state.collectAsState()
+    val consent by vm.settingsStore.consentGranted.collectAsState(initial = false)
+    val sensitivity by vm.settingsStore.alertSensitivity.collectAsState(initial = 0.55f)
+    val contact by vm.settingsStore.emergencyContact.collectAsState(initial = "")
+    val smsEnabled by vm.settingsStore.alertSmsEnabled.collectAsState(initial = false)
+    val countdown by vm.alertManager.countdown.collectAsState()
+
+    val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+    val notificationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        rememberPermissionState(Manifest.permission.POST_NOTIFICATIONS)
+    } else {
+        null
+    }
+
+    var hasBaseline by remember { mutableStateOf(vm.baselineStore.load() != null) }
+    var calibrating by remember { mutableStateOf(false) }
+    var calibMessage by remember { mutableStateOf<String?>(null) }
+
+    ScreenScaffold(title = "Continuous monitoring", onBack = { nav.popBackStack() }) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (!consent) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Consent", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Continuous monitoring listens to your speech to detect sudden changes. " +
+                                "Audio is processed on-device and by Deepgram; only derived features are " +
+                                "stored, never raw audio. Monitoring runs only while the app is open.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(
+                            onClick = { scope.launch { vm.settingsStore.setConsentGranted(true) } },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("I understand and consent")
+                        }
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    InfoRow("Status", if (state.running) "Monitoring" else "Stopped")
+                    InfoRow("Speech", if (state.speechActive) "Detected" else "Silence")
+                    InfoRow("Deepgram", state.deepgramStatus)
+                    InfoRow("Baseline", if (hasBaseline) "Ready" else "Not calibrated")
+                    state.lastError?.let { InfoRow("Last error", it) }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Voice baseline", style = MaterialTheme.typography.titleMedium)
+                    InfoRow("Status", if (hasBaseline) "Ready" else "Not calibrated")
+                    Button(
+                        enabled = micPermission.granted && !calibrating,
+                        onClick = {
+                            scope.launch {
+                                calibrating = true
+                                val profile = vm.speechMonitor.recordBaseline(BASELINE_MS)
+                                hasBaseline = profile != null
+                                calibMessage = if (profile == null) {
+                                    "Not enough speech detected — recalibrate and speak continuously."
+                                } else {
+                                    "Baseline saved from ${profile.sampleCount} speech windows."
+                                }
+                                calibrating = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            when {
+                                calibrating -> "Recording\u2026 speak naturally"
+                                hasBaseline -> "Recalibrate voice baseline (25s)"
+                                else -> "Calibrate voice baseline (25s)"
+                            },
+                        )
+                    }
+                    if (calibMessage != null) {
+                        Text(
+                            calibMessage!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            if (!micPermission.granted) {
+                Button(onClick = micPermission.request, modifier = Modifier.fillMaxWidth()) {
+                    Text("Grant microphone access")
+                }
+            }
+            if (notificationPermission != null && !notificationPermission.granted) {
+                OutlinedButton(
+                    onClick = notificationPermission.request,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Allow notifications for alerts")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("Continuous monitoring")
+                    Text(
+                        "Runs only while the app is open",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = state.running,
+                    enabled = consent && hasBaseline && micPermission.granted,
+                    onCheckedChange = { on ->
+                        scope.launch {
+                            vm.settingsStore.setMonitoringEnabled(on)
+                            if (on) vm.speechMonitor.startMonitoring() else vm.speechMonitor.stopMonitoring()
+                        }
+                    },
+                )
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Live analysis", style = MaterialTheme.typography.titleMedium)
+                    InfoRow("Slur score", "${(state.score * 100).toInt()}%")
+                    ScoreBar(state.score)
+                    if (state.transcript.isNotBlank()) {
+                        Text(
+                            "Heard: ${state.transcript}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    InfoRow("Pitch", "${state.features.f0Mean.toInt()} Hz")
+                    InfoRow("Jitter", "%.3f".format(state.features.jitter))
+                    InfoRow("Shimmer", "%.3f".format(state.features.shimmer))
+                    InfoRow("Harmonics/noise", "${state.features.hnr.toInt()} dB")
+                    InfoRow("Speech rate", "${state.features.wpm.toInt()} wpm")
+                    InfoRow("Confidence", "${(state.features.confidence * 100).toInt()}%")
+                    InfoRow("Pause ratio", "${(state.features.pauseRatio * 100).toInt()}%")
+                    InfoRow("Rhythm (4 Hz)", "%.3f".format(state.features.ems4hz))
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Alert sensitivity", style = MaterialTheme.typography.titleMedium)
+                    Slider(
+                        value = sensitivity,
+                        onValueChange = {
+                            scope.launch { vm.settingsStore.setAlertSensitivity(it) }
+                            vm.speechMonitor.updateSensitivity(it)
+                        },
+                        valueRange = 0.1f..0.9f,
+                    )
+                    Text(
+                        "Higher = more sensitive (more alerts). Current: ${(sensitivity * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    InfoRow(
+                        "Emergency SMS",
+                        when {
+                            !smsEnabled -> "Off"
+                            contact.isBlank() -> "Add a contact in Settings"
+                            else -> contact
+                        },
+                    )
+                }
+            }
+
+            if (state.level == AlertLevel.ALERT || countdown != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = severityColor(1f).copy(alpha = 0.18f),
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Possible stroke signs", style = MaterialTheme.typography.titleMedium)
+                        state.reasons.forEach { Text("\u2022 $it", style = MaterialTheme.typography.bodySmall) }
+                        if (countdown != null) {
+                            Text("Texting your emergency contact in ${countdown}s\u2026")
+                            Button(
+                                onClick = { vm.alertManager.cancelSms() },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Cancel text")
+                            }
+                        }
+                        Button(
+                            onClick = { nav.navigate(Routes.FACE_CALIB) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Run FAST assessment now")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val BASELINE_MS = 25_000L

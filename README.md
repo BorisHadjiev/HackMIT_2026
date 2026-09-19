@@ -28,6 +28,9 @@ The full flow is built and runs on a physical phone:
   key is configured; otherwise they fall back to simulated transcripts.
 - The motor module uses a `MockSensorSource`; the Arduino transports are stubbed
   with clear TODOs.
+- **Continuous speech monitoring** (slur detection) runs while the app is open:
+  mic → VAD → on-device acoustic features + Deepgram → personal-baseline detector
+  → alerts (notification, auto-FAST, optional SMS). See below.
 
 ### Not wired up yet
 
@@ -36,6 +39,9 @@ The full flow is built and runs on a physical phone:
   the Uno (HC-05 Classic BT, HM-10/ESP32 BLE, or an ESP WiFi gateway).
 - Deepgram key should eventually be proxied through a backend instead of shipped in
   the APK.
+- Monitoring is **foreground-only** (stops when the app is backgrounded). The
+  `SpeechMonitor.begin/end` seam is where a foreground-service implementation can be
+  added later.
 
 ---
 
@@ -107,6 +113,50 @@ Without a key, the speech screens run in demo mode with simulated transcripts.
 
 ---
 
+## Continuous speech monitoring (slur detection)
+
+Open **Home → Continuous monitoring**. The flow:
+
+1. Accept the consent notice (continuous audio is sensitive).
+2. Tap **Calibrate voice baseline (20s)** and speak naturally. A personal
+   baseline (per-feature mean/std) is saved to `filesDir` as JSON. Only derived
+   features are stored — **never raw audio**.
+3. Toggle monitoring on. It runs only while the app is in the foreground; it
+   resumes automatically when you return if it was left enabled.
+
+How detection works:
+
+- **VAD** (energy + zero-crossing) gates audio so silence is never sent to Deepgram.
+- **On-device acoustic features**: pitch, jitter, shimmer, harmonics-to-noise
+  ratio, spectral centroid, and 4 Hz envelope-modulation rhythm.
+- **Deepgram** (Nova-3) adds transcript, word confidence, speech rate, pause ratio,
+  and filler ratio. One persistent session with KeepAlive + auto-reconnect.
+- **`SlurDetector`** compares every ~2 s window to your baseline using z-scores,
+  smooths with EWMA, and uses CUSUM to require a sustained change before alerting.
+- **Alerts**: notification + in-app banner, an auto-run FAST assessment, and an
+  optional SMS to an emergency contact (configure in **Settings → Emergency alerts**).
+  The SMS has a 15 s cancel window to protect against false positives.
+
+Required permissions: `RECORD_AUDIO`, `POST_NOTIFICATIONS` (Android 13+), and
+`SEND_SMS` (only if SMS alerts are enabled).
+
+Tune sensitivity with the slider on the monitor screen (higher = more sensitive).
+
+---
+
+## Tests
+
+JVM unit tests cover the DSP and detector (no device needed):
+
+```bash
+./gradlew :app:testDebugUnitTest
+```
+
+`DspTest` verifies pitch, jitter/shimmer, RMS, ZCR, spectral centroid and FFT on
+synthetic signals; `SlurDetectorTest` verifies baseline comparison and alerting.
+
+---
+
 ## Rename the app
 
 The display name and application id live in `gradle.properties`:
@@ -131,21 +181,25 @@ One-command rename (no source files move — the internal Kotlin namespace stays
 app/src/main/java/com/hackmit/app/
   MainActivity.kt, StrokeApplication.kt
   ui/            theme, nav graph (StrokeApp.kt), AssessmentViewModel, screens/, components/
-  domain/        Assessment, ModuleResult, Metric, RiskBand
+  domain/        Assessment, ModuleResult, Metric, RiskBand, MonitorModels
   video/         FaceAnalyzer, AsymmetryCalculator (MediaPipe mirror-pair math)
-  audio/         AudioCapture, DeepgramClient, SpeechAnalyzer, SpeechSession
+  audio/         AudioCapture, DeepgramClient, DeepgramStream, Vad, Dsp,
+                 AcousticFeatureExtractor, SlurDetector, SpeechAnalyzer, SpeechSession,
+                 SpeechMonitor
+  alerts/        AlertManager (notifications, auto-FAST, SMS)
   sensor/        SensorSource, MockSensorSource, BluetoothSppSource, BleSensorSource,
                  WifiSensorSource, SensorRepository
   scoring/       StrokeRiskScorer (weighted FAST bands)
-  data/          SettingsStore (DataStore)
+  data/          SettingsStore, BaselineStore
+app/src/test/java/com/hackmit/app/audio/   DspTest, SlurDetectorTest
 tools/rename.sh
 ```
 
 ### Tech stack
 
 Kotlin 2.0.21 · Jetpack Compose (Material 3) · Navigation Compose · CameraX ·
-MediaPipe Tasks Vision · OkHttp (Deepgram WebSocket) · DataStore · AGP 8.9.2 ·
-Gradle 8.14.4 · compile/target SDK 35 · min SDK 26.
+MediaPipe Tasks Vision · OkHttp (Deepgram WebSocket) · DataStore · Lifecycle
+Process · AGP 8.9.2 · Gradle 8.14.4 · compile/target SDK 35 · min SDK 26.
 
 ---
 
@@ -155,5 +209,7 @@ Gradle 8.14.4 · compile/target SDK 35 · min SDK 26.
    `MediaPipeFaceAnalyzer` on top of `AsymmetryCalculator`.
 2. Implement one Arduino transport (`BluetoothSppSource` is the quickest for an
    Uno + HC-05) and select it in Settings.
-3. Calibrate scoring thresholds against real recordings.
-4. Move the Deepgram key behind a small backend proxy.
+3. Tune slur thresholds with recorded normal vs. slurred clips (a WAV replay
+   harness is the next testing addition).
+4. Add a foreground service so monitoring survives backgrounding.
+5. Move the Deepgram key behind a small backend proxy.

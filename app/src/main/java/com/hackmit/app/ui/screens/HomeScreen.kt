@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
@@ -20,6 +21,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -34,6 +37,7 @@ import com.hackmit.app.ui.components.ScreenScaffold
 
 @Composable
 fun HomeScreen(vm: AssessmentViewModel, nav: NavController) {
+    val monitorState by vm.speechMonitor.state.collectAsState()
     ScreenScaffold(
         title = "Stroke screening",
         actions = {
@@ -87,6 +91,17 @@ fun HomeScreen(vm: AssessmentViewModel, nav: NavController) {
                 score = vm.results[ModuleType.MOTOR]?.score,
                 icon = Icons.Filled.Sensors,
                 onClick = { nav.navigate(Routes.MOTOR_CALIB) },
+            )
+            ModuleCard(
+                title = "Continuous monitoring",
+                subtitle = if (monitorState.running) {
+                    "Listening (${if (monitorState.speechActive) "speech" else "silence"})"
+                } else {
+                    "Slur detection while the app is open"
+                },
+                score = if (monitorState.running) monitorState.score else null,
+                icon = Icons.Filled.GraphicEq,
+                onClick = { nav.navigate(Routes.MONITOR) },
             )
 
             Spacer(Modifier.padding(top = 4.dp))

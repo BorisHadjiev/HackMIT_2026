@@ -6,10 +6,15 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.lifecycle.viewModelScope
+import com.hackmit.app.alert.AlertDelivery
+import com.hackmit.app.alert.AlertDeliveryStatus
+import com.hackmit.app.alert.AlertSource
 import com.hackmit.app.di.AppContainer
 import com.hackmit.app.domain.Assessment
 import com.hackmit.app.domain.ModuleResult
 import com.hackmit.app.domain.ModuleType
+import kotlinx.coroutines.launch
 
 data class MotorBaseline(val meanMagnitude: Float, val tremorEnergy: Float)
 
@@ -28,6 +33,9 @@ class AssessmentViewModel(private val container: AppContainer) : ViewModel() {
     var assessment by mutableStateOf<Assessment?>(null)
         private set
 
+    var alertDelivery by mutableStateOf(AlertDelivery())
+        private set
+
     var faceBaseline by mutableStateOf<Float?>(null)
     var speechBaselineWpm by mutableStateOf<Float?>(null)
     var motorBaseline by mutableStateOf<MotorBaseline?>(null)
@@ -43,6 +51,33 @@ class AssessmentViewModel(private val container: AppContainer) : ViewModel() {
         faceBaseline = null
         speechBaselineWpm = null
         motorBaseline = null
+        alertDelivery = AlertDelivery()
+    }
+
+    /** Sends a caregiver summary through the configured Linq gateway. */
+    fun sendAssessmentAlert() {
+        if (alertDelivery.status == AlertDeliveryStatus.SENDING) return
+        alertDelivery = AlertDelivery(AlertDeliveryStatus.SENDING, "Sending alert…")
+        viewModelScope.launch {
+            alertDelivery = container.alertRepository.sendAssessmentSummary(assessment)
+        }
+    }
+
+    /**
+     * Opt-in entry point for a future Deepgram/Elastic callback. Call this only after
+     * product policy has decided the external signal is worth sharing with the caregiver.
+     */
+    fun sendExternalAlert(
+        source: AlertSource,
+        title: String,
+        summary: String,
+        urgent: Boolean = false,
+    ) {
+        if (alertDelivery.status == AlertDeliveryStatus.SENDING) return
+        alertDelivery = AlertDelivery(AlertDeliveryStatus.SENDING, "Sending alert…")
+        viewModelScope.launch {
+            alertDelivery = container.alertRepository.sendExternalSignal(source, title, summary, urgent)
+        }
     }
 }
 

@@ -27,6 +27,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.hackmit.app.BuildConfig
+import com.hackmit.app.alert.AlertConfig
 import com.hackmit.app.sensor.SensorTransport
 import com.hackmit.app.ui.AssessmentViewModel
 import com.hackmit.app.ui.components.InfoRow
@@ -40,11 +41,21 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val storedKey by vm.settingsStore.deepgramKey.collectAsState(initial = "")
     val storedMock by vm.settingsStore.mockSensors.collectAsState(initial = true)
     val storedMac by vm.settingsStore.sensorMac.collectAsState(initial = "")
+    val storedAlertConfig by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
 
     var keyInput by remember(storedKey) { mutableStateOf(storedKey) }
     var mock by remember(storedMock) { mutableStateOf(storedMock) }
     var address by remember(storedMac) { mutableStateOf(storedMac) }
     var transport by remember { mutableStateOf(SensorTransport.MOCK) }
+    var gatewayUrl by remember(storedAlertConfig) { mutableStateOf(storedAlertConfig.gatewayUrl) }
+    var gatewayToken by remember(storedAlertConfig) { mutableStateOf(storedAlertConfig.gatewayToken) }
+    var trustedContactName by remember(storedAlertConfig) {
+        mutableStateOf(storedAlertConfig.trustedContactName)
+    }
+    var trustedContactPhone by remember(storedAlertConfig) {
+        mutableStateOf(storedAlertConfig.trustedContactPhone)
+    }
+    var emergencyNumber by remember(storedAlertConfig) { mutableStateOf(storedAlertConfig.emergencyNumber) }
 
     ScreenScaffold(title = "Settings", onBack = { nav.popBackStack() }) { padding ->
         Column(
@@ -76,6 +87,78 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                     }
                     Text(
                         "In production, proxy audio through a backend so the key never ships in the APK.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Care alerts (Linq)", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = gatewayUrl,
+                        onValueChange = { gatewayUrl = it },
+                        label = { Text("Alert gateway URL") },
+                        placeholder = { Text("https://api.example.com/v1/stroke-alerts") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = gatewayToken,
+                        onValueChange = { gatewayToken = it },
+                        label = { Text("Alert gateway token (demo only)") },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = trustedContactName,
+                        onValueChange = { trustedContactName = it },
+                        label = { Text("Trusted contact name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = trustedContactPhone,
+                        onValueChange = { trustedContactPhone = it },
+                        label = { Text("Trusted contact phone (E.164)") },
+                        placeholder = { Text("+15551234567") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = emergencyNumber,
+                        onValueChange = { emergencyNumber = it },
+                        label = { Text("Local emergency number") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                vm.settingsStore.setAlertConfig(
+                                    AlertConfig(
+                                        gatewayUrl = gatewayUrl,
+                                        gatewayToken = gatewayToken,
+                                        trustedContactName = trustedContactName,
+                                        trustedContactPhone = trustedContactPhone,
+                                        emergencyNumber = emergencyNumber,
+                                    ),
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Save alert settings")
+                    }
+                    Text(
+                        "The app sends only a short screening summary to your gateway. " +
+                            "Keep the Linq integration token on that server, not on this phone. " +
+                            "A gateway token is only for the local demo.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

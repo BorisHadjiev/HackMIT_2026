@@ -1,6 +1,7 @@
 package com.hackmit.app.di
 
 import android.content.Context
+import com.hackmit.app.alert.AlertRepository
 import com.hackmit.app.data.SettingsStore
 import com.hackmit.app.scoring.StrokeRiskScorer
 import com.hackmit.app.sensor.SensorRepository
@@ -12,4 +13,5 @@ class AppContainer(context: Context) {
     val settingsStore: SettingsStore = SettingsStore(context)
     val sensorRepository: SensorRepository = SensorRepository()
     val scorer: StrokeRiskScorer = StrokeRiskScorer()
+    val alertRepository: AlertRepository = AlertRepository(settingsStore)
 }

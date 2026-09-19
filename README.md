@@ -107,6 +107,71 @@ Without a key, the speech screens run in demo mode with simulated transcripts.
 
 ---
 
+## Care alerts with Linq
+
+The results screen can send a concise screening summary to a trusted contact and,
+for a high-concern result, offers a **Call emergency services** button. The call
+button only opens Android's dialer after a confirmation tap; the app never places
+an emergency call automatically.
+
+Configure these in Settings → **Care alerts (Linq)**:
+
+- an HTTPS URL for your app-owned alert gateway;
+- an optional alert-gateway token for the local backend demo (not a Linq key);
+- the trusted contact's E.164 phone number (for example, `+15551234567`);
+- the local emergency number (defaults to `911`).
+
+The phone posts an idempotent JSON envelope to the gateway, for example:
+
+```json
+{
+  "alert_id": "uuid",
+  "source": "assessment",
+  "kind": "emergency_recommended",
+  "severity": "urgent",
+  "title": "URGENT: StrokeSense recommends emergency help",
+  "body": "Screening score: 72%...",
+  "recipient": { "name": "Caregiver", "phone": "+15551234567" }
+}
+```
+
+That gateway—not the APK—must authenticate the user, restrict recipients to an
+approved contact list, and call Linq using its server-side
+`Authorization: Bearer` API token. This keeps the Linq secret out of the client. The
+Android modules are deliberately reusable:
+
+- `alert/AlertMessageFactory.kt`: builds no-test, assessment, Deepgram, Elastic,
+  or other external-signal summaries without sending raw transcripts/audio.
+- `alert/LinqAlertGateway.kt`: sends the envelope and preserves an optional Linq
+  trace ID returned by the gateway.
+- `alert/AlertRepository.kt`: the UI-facing coordinator; use
+`AssessmentViewModel.sendExternalAlert(AlertSource.DEEPGRAM, ...)` or
+  `AssessmentViewModel.sendExternalAlert(AlertSource.ELASTIC, ...)` for future
+integrations.
+
+For the companion FastAPI backend, put the Linq key in its uncommitted `.env` as
+`LINQ_API_KEY`; do not add it to Android's `local.properties`, Settings, or any
+tracked source file. The Android **Alert gateway token** field is only for that
+backend's optional demo protection and is not a Linq credential.
+
+For example, a future Deepgram policy can share metrics after the user finishes a
+test (rather than streaming each transcript):
+
+```kotlin
+vm.sendExternalAlert(
+    source = AlertSource.DEEPGRAM,
+    title = "Speech screening needs attention",
+    summary = "Low transcription confidence and long pauses were detected.",
+    urgent = false,
+)
+```
+
+Linq's messaging API uses an `X-LINQ-INTEGRATION-TOKEN`, and it supports delivery
+webhooks and trace IDs, which the gateway should use for auditing/retry rather
+than the phone attempting direct delivery. See the [Linq API overview](https://docs.linqapp.com/channel/imessage/v2/api/) and [webhook event guide](https://docs.linqapp.com/channel/imessage/guides/webhooks/events/).
+
+---
+
 ## Rename the app
 
 The display name and application id live in `gradle.properties`:
@@ -134,6 +199,7 @@ app/src/main/java/com/hackmit/app/
   domain/        Assessment, ModuleResult, Metric, RiskBand
   video/         FaceAnalyzer, AsymmetryCalculator (MediaPipe mirror-pair math)
   audio/         AudioCapture, DeepgramClient, SpeechAnalyzer, SpeechSession
+  alert/         alert drafts, summary factory, secure Linq gateway client, repository
   sensor/        SensorSource, MockSensorSource, BluetoothSppSource, BleSensorSource,
                  WifiSensorSource, SensorRepository
   scoring/       StrokeRiskScorer (weighted FAST bands)

@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.hackmit.app.BuildConfig
+import com.hackmit.app.alert.AlertConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -18,6 +19,11 @@ class SettingsStore(private val context: Context) {
     private val keyMock = booleanPreferencesKey("mock_sensors")
     private val keyMac = stringPreferencesKey("sensor_mac")
     private val keyTransport = stringPreferencesKey("sensor_transport")
+    private val keyAlertGateway = stringPreferencesKey("alert_gateway_url")
+    private val keyAlertGatewayToken = stringPreferencesKey("alert_gateway_token")
+    private val keyTrustedContactName = stringPreferencesKey("trusted_contact_name")
+    private val keyTrustedContactPhone = stringPreferencesKey("trusted_contact_phone")
+    private val keyEmergencyNumber = stringPreferencesKey("emergency_number")
 
     private val keyConsent = booleanPreferencesKey("monitor_consent")
     private val keyMonitoring = booleanPreferencesKey("monitoring_enabled")
@@ -31,6 +37,15 @@ class SettingsStore(private val context: Context) {
     val mockSensors: Flow<Boolean> = context.dataStore.data.map { it[keyMock] ?: true }
     val sensorMac: Flow<String> = context.dataStore.data.map { it[keyMac].orEmpty() }
     val sensorTransport: Flow<String> = context.dataStore.data.map { it[keyTransport] ?: "MOCK" }
+    val alertConfig: Flow<AlertConfig> = context.dataStore.data.map {
+        AlertConfig(
+            gatewayUrl = it[keyAlertGateway].orEmpty(),
+            gatewayToken = it[keyAlertGatewayToken].orEmpty(),
+            trustedContactName = it[keyTrustedContactName].orEmpty(),
+            trustedContactPhone = it[keyTrustedContactPhone].orEmpty(),
+            emergencyNumber = it[keyEmergencyNumber]?.takeIf(String::isNotBlank) ?: "911",
+        )
+    }
 
     val consentGranted: Flow<Boolean> = context.dataStore.data.map { it[keyConsent] ?: false }
     val monitoringEnabled: Flow<Boolean> = context.dataStore.data.map { it[keyMonitoring] ?: false }
@@ -72,5 +87,15 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setAlertSmsEnabled(value: Boolean) {
         context.dataStore.edit { it[keySms] = value }
+    }
+
+    suspend fun setAlertConfig(value: AlertConfig) {
+        context.dataStore.edit {
+            it[keyAlertGateway] = value.gatewayUrl.trim()
+            it[keyAlertGatewayToken] = value.gatewayToken.trim()
+            it[keyTrustedContactName] = value.trustedContactName.trim()
+            it[keyTrustedContactPhone] = value.trustedContactPhone.trim()
+            it[keyEmergencyNumber] = value.emergencyNumber.trim()
+        }
     }
 }

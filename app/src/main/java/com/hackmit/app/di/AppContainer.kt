@@ -1,6 +1,7 @@
 package com.hackmit.app.di
 
 import android.content.Context
+import com.hackmit.app.alert.AlertRepository
 import com.hackmit.app.alerts.AlertManager
 import com.hackmit.app.audio.SpeechMonitor
 import com.hackmit.app.data.BaselineStore
@@ -24,4 +25,5 @@ class AppContainer(context: Context) {
     val alertManager: AlertManager = AlertManager(context, settingsStore, appScope)
     val speechMonitor: SpeechMonitor =
         SpeechMonitor(appScope, settingsStore, baselineStore, alertManager)
+    val alertRepository: AlertRepository = AlertRepository(settingsStore)
 }

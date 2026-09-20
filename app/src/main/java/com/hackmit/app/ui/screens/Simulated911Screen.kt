@@ -84,6 +84,7 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
     var status by remember { mutableStateOf("Idle") }
     var seconds by remember { mutableIntStateOf(0) }
     var onset by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
     val lines = remember { mutableStateListOf<Line>() }
 
     fun endCall() {
@@ -113,6 +114,7 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { put("signs", it.joinToString(",")) }
             if (onset.isNotBlank()) put("onset_minutes", onset)
+            if (location.isNotBlank()) put("location", location)
         }
         val p = PcmPlayer()
         p.start()
@@ -212,6 +214,19 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
             }
 
             if (!active) {
+                Text(
+                    "StrokeSense places the call and reports the patient's screening result, " +
+                        "symptoms and location to the dispatcher. You can answer its follow-ups.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = location,
+                    onValueChange = { location = it.take(120) },
+                    label = { Text("Patient location (address or cross streets)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 OutlinedTextField(
                     value = onset,
                     onValueChange = { onset = it.filter(Char::isDigit).take(3) },

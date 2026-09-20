@@ -37,6 +37,7 @@ never sees the Linq token. It only knows the gateway URL and a shared
 | `POST` | `/v1/slur/calibrate` | Enroll the user's voice (≥8 s) → personal scoring mode |
 | `GET` | `/v1/slur/status` | Current slur mode (`personal`/`corpus`) + enrollment state |
 | `POST` | `/v1/slur/clear` | Forget the slur voice profile |
+| `POST` | `/v1/asr/transcribe` | Batch transcription (provider: `deepgram` \| `whisper` \| `auto`) |
 | `GET` | `/v1/speaker/status` | Gating status + enrollment state |
 
 ### Voice (TTS + agent)
@@ -98,6 +99,19 @@ uvicorn workers.
 
 Validated on TORGO: same-speaker healthy (incl. different content) ≈ 0.00,
 dysarthric 1.00, synthesized acute slur 0.9996.
+
+### Transcription providers (ASR)
+
+`POST /v1/asr/transcribe` takes a WAV/PCM body and returns a normalized
+`{text, words[], confidence, wpm, filler_ratio, ...}` shape, honoring
+`ASR_PROVIDER`:
+- `whisper` — local `openai-whisper` (`large-v3`) on the GB10 GPU. Private and
+  free; ~2.5 s for a 7 s clip. No ffmpeg needed (WAV decoded in-process).
+- `deepgram` — the Deepgram REST API (Nova-3).
+- `auto` — whisper with automatic Deepgram fallback on error.
+
+The app's live stream still uses the Deepgram WS proxy; switching it to the local
+provider is a follow-up app-side change.
 
 ## Configuration
 

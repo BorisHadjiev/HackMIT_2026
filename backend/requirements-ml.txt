@@ -4,3 +4,5 @@ torch>=2.3
 transformers>=4.44
 torchaudio>=2.3
 mediapipe>=0.10
+# Local GPU transcription (provider: whisper). ffmpeg not required (WAV decoded in-process).
+openai-whisper>=20231117

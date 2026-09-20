@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # Per-user slur voice profile (personal-centroid mode). Single-user demo file.
     slur_profile_path: str = "models/slur/slur_profile.json"
 
+    # Transcription provider for /v1/asr/transcribe: deepgram | whisper | auto.
+    asr_provider: str = "auto"
+    whisper_model: str = "large-v3"
+    whisper_device: str = "cuda"
+
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
     max_body_bytes: int = 16384

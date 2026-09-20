@@ -19,6 +19,7 @@ from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import ConnectionClosed
 
 from .agent import AgentClient
+from .asr import Asr
 from .config import Settings, get_settings
 from .database import Database
 from .face import FaceServer
@@ -52,12 +53,14 @@ async def lifespan(app: FastAPI):
     async with httpx.AsyncClient(timeout=15.0) as client:
         app.state.settings = settings
         app.state.db = db
+        app.state.http = client
         app.state.linq = LinqClient(client, settings)
         app.state.tts = TtsEngine(settings)
         app.state.agent = AgentClient(settings)
         app.state.speaker = SpeakerGate(settings)
         app.state.face = FaceServer(settings.face_model_path, settings.face_lr_path)
         app.state.slur = SlurServer(settings.slur_model_path, settings.slur_profile_path)
+        app.state.asr = Asr(settings)
         log.info(
             "gateway ready: linq=%s deepgram=%s recipients=%d auth=%s db=%s",
             settings.linq_configured,
@@ -428,6 +431,20 @@ async def risk_outcome(
         raise HTTPException(status_code=404, detail="risk assessment not found")
     log.info("risk outcome %s -> %s", req.risk_id, req.outcome)
     return {"status": "ok"}
+
+
+@app.post("/v1/asr/transcribe")
+async def asr_transcribe(
+    request: Request,
+    x_alert_gateway_token: str | None = Header(default=None),
+) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    _check_rate(settings, x_alert_gateway_token or "anonymous")
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="empty audio")
+    return await request.app.state.asr.transcribe(body, request.app.state.http)
 
 
 @app.get("/v1/linq/status")

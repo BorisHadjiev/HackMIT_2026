@@ -81,21 +81,21 @@ class Settings(BaseSettings):
     agent_public_base_url: str = ""  # public base Deepgram can reach; falls back to linq_public_base_url
     agent_listen_model: str = "nova-3"
     agent_llm_model: str = "qwen2.5:3b"
+    agent_caller_model: str = "qwen2.5:3b"
     agent_llm_secret: str = ""
     agent_voice: str = "aura-2-thalia-en"
     agent_greeting: str = (
         "911, this is a simulated dispatcher. No real help will be dispatched. "
-        "I've received the StrokeSense alert — let me confirm the details."
+        "I've received the StrokeSense alert. Can you confirm the patient's location?"
     )
     agent_prompt: str = (
         "You are a calm, brief 911 dispatcher receiving an AUTOMATED StrokeSense alert call. "
-        "The caller is the StrokeSense app, which has already reported the patient's stroke "
-        "screening result, symptoms, and location; that report is the first user message in the "
-        "conversation history. Restate the location and the key symptoms to confirm, then give "
-        "short, calm instructions and ask at most one follow-up question at a time (time since "
-        "onset, patient responsiveness, breathing). You are a SIMULATED dispatcher: state plainly "
-        "that this is a simulation and that no real help is dispatched. Never diagnose. Keep every "
-        "reply to one to three short sentences."
+        "Reply with EXACTLY ONE short question per turn and wait for the answer. Ask for the next "
+        "item not yet confirmed, in this order: (1) the exact location, (2) the symptoms, (3) how "
+        "long ago they started, (4) whether the patient is awake and responsive, (5) whether "
+        "breathing is normal. Do not give lists, steps, or a summary until all five are confirmed; "
+        "then give one short closing line. You are a SIMULATED dispatcher: never claim that real "
+        "units, ambulances, or help are dispatched — say plainly this is a simulation. Never diagnose."
     )
 
     bind: str = "127.0.0.1:8000"

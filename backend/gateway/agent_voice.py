@@ -46,8 +46,8 @@ def format_context(context: dict | None) -> str:
     return "StrokeSense automated alert: " + "; ".join(bits) + ". (Screening aid, not a diagnosis.)"
 
 
-def build_settings(settings: Settings, context: dict | None = None) -> dict:
-    report = format_context(context)
+def build_settings(settings: Settings, context: dict | None = None, seed_report: bool = True) -> dict:
+    report = format_context(context) if seed_report else ""
 
     think: dict = {
         "provider": {"type": "open_ai", "model": settings.agent_llm_model, "temperature": 0.4},

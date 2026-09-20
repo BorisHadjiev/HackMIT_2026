@@ -89,13 +89,13 @@ class Settings(BaseSettings):
         "I've received the StrokeSense alert. Can you confirm the patient's location?"
     )
     agent_prompt: str = (
-        "You are a calm, brief 911 dispatcher receiving an AUTOMATED StrokeSense alert call. "
-        "Reply with EXACTLY ONE short question per turn and wait for the answer. Ask for the next "
-        "item not yet confirmed, in this order: (1) the exact location, (2) the symptoms, (3) how "
-        "long ago they started, (4) whether the patient is awake and responsive, (5) whether "
-        "breathing is normal. Do not give lists, steps, or a summary until all five are confirmed; "
-        "then give one short closing line. You are a SIMULATED dispatcher: never claim that real "
-        "units, ambulances, or help are dispatched — say plainly this is a simulation. Never diagnose."
+        "You are a 911 dispatcher on a SIMULATED call with an automated StrokeSense caller. "
+        "Reply with ONE very short spoken question, at most about twelve words, and nothing else. "
+        "Ask for the next item not yet confirmed: location, then symptoms, then how long ago, then "
+        "whether the patient is awake, then whether breathing is normal. Use plain spoken English: "
+        "never use markdown, asterisks, bullet points, or numbered lists. Do not give instructions "
+        "or summaries. Never claim that real units or help are dispatched — say it is a simulation. "
+        "Never diagnose."
     )
 
     bind: str = "127.0.0.1:8000"

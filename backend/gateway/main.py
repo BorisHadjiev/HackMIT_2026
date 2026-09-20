@@ -118,6 +118,34 @@ def _to_ws_url(url: str) -> str:
     return url.replace("https://", "wss://").replace("http://", "ws://")
 
 
+_DISPATCHER_DIRECTIVE = (
+    " Reply with exactly ONE very short spoken question and nothing else. "
+    "Plain text only: no markdown, no asterisks, no bullet points, no numbered lists."
+)
+
+
+def _shape_dispatcher_body(body: bytes) -> bytes:
+    """Constrain the dispatcher LLM: short, plain-spoken, one question per turn."""
+    try:
+        data = json.loads(body)
+    except Exception:
+        return body
+    if not isinstance(data, dict):
+        return body
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        for m in messages:
+            if isinstance(m, dict) and m.get("role") == "system" and isinstance(m.get("content"), str):
+                m["content"] = m["content"] + _DISPATCHER_DIRECTIVE
+                break
+        else:
+            messages.insert(0, {"role": "system", "content": _DISPATCHER_DIRECTIVE.strip()})
+    # Local models are "thinking" models; a small token cap would be consumed by
+    # reasoning and yield empty content, so don't cap here. Brevity comes from the prompt.
+    data.setdefault("think", False)
+    return json.dumps(data).encode()
+
+
 @app.middleware("http")
 async def limit_body_size(request: Request, call_next):
     settings = getattr(request.app.state, "settings", None)
@@ -483,7 +511,7 @@ async def llm_chat_completions(
     provided = (authorization or "").removeprefix("Bearer ").strip()
     if not hmac.compare_digest(provided, settings.agent_llm_secret):
         raise HTTPException(status_code=401, detail="invalid llm token")
-    body = await request.body()
+    body = _shape_dispatcher_body(await request.body())
     upstream = f"{settings.ollama_url.rstrip('/')}/v1/chat/completions"
 
     async def stream():

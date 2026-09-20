@@ -75,6 +75,28 @@ class Settings(BaseSettings):
     whisper_model: str = "large-v3"
     whisper_device: str = "cuda"
 
+    # Simulated-911 voice agent (Deepgram Voice Agent API + BYO local Ollama LLM).
+    agent_enabled: bool = False
+    agent_url: str = "wss://agent.deepgram.com/v1/agent/converse"
+    agent_public_base_url: str = ""  # public base Deepgram can reach; falls back to linq_public_base_url
+    agent_listen_model: str = "nova-3"
+    agent_llm_model: str = "qwen2.5:3b"
+    agent_llm_secret: str = ""
+    agent_voice: str = "aura-2-thalia-en"
+    agent_greeting: str = (
+        "This is a simulated 911 call for StrokeSense. No call is placed and no help "
+        "is dispatched. Tell me what's happening."
+    )
+    agent_prompt: str = (
+        "You are a calm, brief SIMULATED 911 dispatcher for a StrokeSense training demo. "
+        "You are NOT a real dispatcher and no help is ever dispatched. Open by making clear "
+        "this is a simulation. Speak in short sentences, one question at a time. Gather the "
+        "caller's location, what symptoms they see, and how long ago they started. Use the "
+        "caller screening context to ask symptom-aware follow-ups. If asked whether help is "
+        "coming, say plainly that this is a simulation and no services were contacted. Never "
+        "give a diagnosis; you may repeat the local emergency number when wrapping up."
+    )
+
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
     max_body_bytes: int = 16384

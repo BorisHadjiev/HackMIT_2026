@@ -36,6 +36,8 @@ import com.hackmit.app.audio.AudioCapture
 import com.hackmit.app.audio.RiskResult
 import com.hackmit.app.audio.RiskServer
 import com.hackmit.app.audio.SlurServer
+import com.hackmit.app.audio.Transcript
+import com.hackmit.app.audio.TranscribeServer
 import com.hackmit.app.audio.Speaker
 import com.hackmit.app.audio.Wav
 import com.hackmit.app.domain.AlertLevel
@@ -76,6 +78,7 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
     var aiTestScore by remember { mutableStateOf<Float?>(null) }
     var aiTestMessage by remember { mutableStateOf<String?>(null) }
     var aiTestMode by remember { mutableStateOf<String?>(null) }
+    var aiTestTranscript by remember { mutableStateOf<Transcript?>(null) }
     var riskBusy by remember { mutableStateOf(false) }
     var riskResult by remember { mutableStateOf<RiskResult?>(null) }
     var riskMessage by remember { mutableStateOf<String?>(null) }
@@ -242,6 +245,8 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                                 aiTestBusy = true
                                 aiTestScore = null
                                 aiTestMessage = null
+                                aiTestMode = null
+                                aiTestTranscript = null
                                 val pcm = ByteArrayOutputStream()
                                 val capture = AudioCapture { pcm.write(it) }
                                 if (!capture.start()) {
@@ -252,6 +257,7 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                                     val wav = Wav.wrapPcm16(pcm.toByteArray())
                                     aiTestScore = SlurServer.analyze(vm.settingsStore, wav)
                                     aiTestMode = SlurServer.mode(vm.settingsStore)
+                                    aiTestTranscript = TranscribeServer.transcribe(vm.settingsStore, wav)
                                     if (aiTestScore == null) aiTestMessage = "Could not reach the AI server."
                                 }
                                 aiTestBusy = false
@@ -270,6 +276,10 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                         )
                         val modeText = aiTestMode ?: "corpus"
                         InfoRow("Model", if (modeText == "personal") "Personal (your voice)" else "Population")
+                    }
+                    aiTestTranscript?.let { t ->
+                        InfoRow("Transcript (${t.provider})", t.text.ifBlank { "—" })
+                        InfoRow("Speech rate", "${t.wpm.toInt()} wpm")
                     }
                     aiTestMessage?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall)

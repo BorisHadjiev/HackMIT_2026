@@ -452,9 +452,10 @@ vm.sendExternalAlert(
 )
 ```
 
-Linq's messaging API uses an `X-LINQ-INTEGRATION-TOKEN`, and it supports delivery
+Linq's messaging API uses `Authorization: Bearer <integration-token>` (V3: `POST
+/v3/chats` with `from`/`to`/`message.parts`), and it supports delivery
 webhooks and trace IDs, which the gateway should use for auditing/retry rather
-than the phone attempting direct delivery. See the [Linq API overview](https://docs.linqapp.com/channel/imessage/v2/api/) and [webhook event guide](https://docs.linqapp.com/channel/imessage/guides/webhooks/events/).
+than the phone attempting direct delivery. See the [Linq API overview](https://docs.linqapp.com/channel/imessage/api/) and [webhook event guide](https://docs.linqapp.com/channel/imessage/guides/webhooks/events/).
 
 ---
 

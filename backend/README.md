@@ -130,9 +130,12 @@ Copy `.env.example` to `.env` and set:
 `LINQ_FROM_NUMBER` must exist in your organization; check with:
 
 ```bash
-curl -s https://api.linqapp.com/api/partner/v2/phone_numbers \
-  -H "X-LINQ-INTEGRATION-TOKEN: $LINQ_API_TOKEN"
+curl -s https://api.linqapp.com/v3/phone_numbers \
+  -H "Authorization: Bearer $LINQ_API_TOKEN"
 ```
+
+Sending uses the **V3** API (`POST /v3/chats` with `from` / `to` / `message.parts`,
+`Authorization: Bearer <token>`); see `gateway/linq.py`.
 
 ## Run locally
 

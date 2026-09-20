@@ -370,13 +370,18 @@ async def face_debug(
 
 
 @app.post("/v1/slur/analyze")
-async def slur_analyze(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+async def slur_analyze(
+    request: Request,
+    x_alert_gateway_token: str | None = Header(default=None),
+    mode: str | None = None,
+) -> dict:
     settings: Settings = request.app.state.settings
     _authorize(settings, x_alert_gateway_token)
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="empty wav")
-    return await asyncio.to_thread(request.app.state.slur.analyze, body)
+    override = mode if mode in ("corpus", "personal") else None
+    return await asyncio.to_thread(request.app.state.slur.analyze, body, override)
 
 
 @app.post("/v1/slur/calibrate")

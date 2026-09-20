@@ -77,7 +77,8 @@ class Settings(BaseSettings):
 
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
-    max_body_bytes: int = 16384
+    # Face JPEGs and 4–16 s slur WAVs are 50–500 KB; 16 KB rejected them.
+    max_body_bytes: int = 2_000_000
 
     @property
     def allowed_recipient_set(self) -> set[str]:

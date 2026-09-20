@@ -326,7 +326,7 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                                     AlertLevel.ALERT, AlertLevel.WARNING -> "abnormal"
                                     else -> "normal"
                                 }
-                                val score = state.aiScore ?: state.score
+                                val score = maxOf(state.aiScore ?: 0f, state.score)
                                 val modules = mutableMapOf(
                                     "speech" to Triple(score, outcome, 0.9f),
                                 )

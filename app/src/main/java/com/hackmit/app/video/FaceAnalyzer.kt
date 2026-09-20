@@ -69,10 +69,10 @@ class MediaPipeFaceAnalyzer : FaceAnalyzer {
  *   2. measures the *perpendicular* offset of paired landmarks from that axis,
  *   3. normalizes by interocular distance (scale-invariant).
  *
- * Validation on that dataset (population-level, after residualizing out its face-scale
- * confound): mouth droop AUC 0.79 (0.89 raw, and 0.86-0.92 within every face-scale
- * quartile); a logistic regression on the corrected geometry reaches AUC 0.90.
- * Eyelid-opening asymmetry is weak (AUC 0.55 scale-residualized).
+ * Cross-dataset validation (mouth droop AUC): Kaggle stroke faces 0.89 (0.79 after
+ * residualizing out that dataset's face-scale confound), PalsyNet-5230 0.76,
+ * face-stroke-tiny 0.85. A logistic regression on the corrected geometry reaches
+ * 0.78-0.90. Eyelid-opening asymmetry is weaker and noisy on in-the-wild faces.
  */
 object AsymmetryCalculator {
 
@@ -94,17 +94,28 @@ object AsymmetryCalculator {
 
     /**
      * Full-scale normalizers for raw perpendicular asymmetry (fraction of interocular
-     * distance). Measured means on the stroke dataset: mouth 0.023 non-stroke / 0.076
-     * stroke; eyelid-opening asymmetry 0.077 / 0.112.
+     * distance). Chosen by grid search over the Kaggle stroke, PalsyNet and
+     * face-stroke-tiny datasets plus LFW as a healthy control, targeting <=5% false
+     * positives on LFW at the app's 0.33 threshold (was 9.3% before tuning).
+     *
+     * Healthy (LFW) percentiles: mouth p95 0.041 / p99 0.059; cheek p95 0.049;
+     * eyelid-opening asymmetry p95 0.184 / p99 0.324.
      */
-    private const val MOUTH_DROOP_FULL_SCALE = 0.10f
-    private const val CHEEK_FULL_SCALE = 0.08f
+    private const val MOUTH_DROOP_FULL_SCALE = 0.12f
+    private const val CHEEK_FULL_SCALE = 0.12f
     private const val EYE_OPENING_FULL_SCALE = 0.25f
 
-    // Mouth droop is the most discriminative sign by a wide margin.
-    private const val MOUTH_WEIGHT = 0.70f
-    private const val CHEEK_WEIGHT = 0.20f
+    // Mouth droop is the most discriminative sign by a wide margin; eyelid asymmetry
+    // is noisy on in-the-wild faces, so it only contributes a small amount.
+    private const val MOUTH_WEIGHT = 0.75f
+    private const val CHEEK_WEIGHT = 0.15f
     private const val EYE_WEIGHT = 0.10f
+
+    /**
+     * Below this combined eyelid opening (in interocular units) both eyes are treated
+     * as closed, so eyelid asymmetry is not assessed (avoids a noisy ratio on blinks).
+     */
+    private const val MIN_EYE_OPENING = 0.05f
 
     data class Features(
         val asymmetry: Float,
@@ -152,8 +163,9 @@ object AsymmetryCalculator {
             landmarks[LID_UPPER_RIGHT * 2] - landmarks[LID_LOWER_RIGHT * 2],
             landmarks[LID_UPPER_RIGHT * 2 + 1] - landmarks[LID_LOWER_RIGHT * 2 + 1],
         ) / interocular
-        val eyeOpeningAsymmetry = if (eyeOpenLeft + eyeOpenRight > 0f) {
-            abs(eyeOpenLeft - eyeOpenRight) / (eyeOpenLeft + eyeOpenRight)
+        val eyeOpeningSum = eyeOpenLeft + eyeOpenRight
+        val eyeOpeningAsymmetry = if (eyeOpeningSum >= MIN_EYE_OPENING) {
+            abs(eyeOpenLeft - eyeOpenRight) / eyeOpeningSum
         } else {
             0f
         }

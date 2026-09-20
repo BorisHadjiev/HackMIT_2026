@@ -55,8 +55,8 @@ class FaceAsymmetryTest {
     fun droopedMouthRaisesIndexMonotonically() {
         val mild = AsymmetryCalculator.mouthDroop(face(mouthRy = 0.705f))
         val strong = AsymmetryCalculator.mouthDroop(face(mouthRy = 0.71f))
-        assertEquals(0.25f, mild, 0.02f)
-        assertEquals(0.50f, strong, 0.02f)
+        assertEquals(0.21f, mild, 0.02f)
+        assertEquals(0.42f, strong, 0.02f)
         assertTrue(strong > mild)
     }
 
@@ -85,6 +85,12 @@ class FaceAsymmetryTest {
     fun eyelidOpeningAsymmetryIsDetected() {
         val f = AsymmetryCalculator.features(face(lidOpenR = 0.08f))
         assertTrue("eyeAsymmetry=${f.eyeAsymmetry}", f.eyeAsymmetry > 0.1f)
+    }
+
+    @Test
+    fun closedEyesAreNotScoredForEyelidAsymmetry() {
+        val f = AsymmetryCalculator.features(face(lidOpenL = 0.002f, lidOpenR = 0.006f))
+        assertEquals(0f, f.eyeAsymmetry, 1e-4f)
     }
 
     @Test

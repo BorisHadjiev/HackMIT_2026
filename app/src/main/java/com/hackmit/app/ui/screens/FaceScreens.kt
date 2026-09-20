@@ -1,6 +1,7 @@
 package com.hackmit.app.ui.screens
 
 import android.Manifest
+import androidx.camera.core.ImageProxy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,12 +18,12 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,12 +44,12 @@ import com.hackmit.app.ui.components.ScreenScaffold
 import com.hackmit.app.ui.components.SpeakButton
 import com.hackmit.app.ui.components.rememberPermissionState
 import com.hackmit.app.video.AsymmetryCalculator
+import com.hackmit.app.video.FaceAnalysisController
 import com.hackmit.app.video.FaceFrame
-import com.hackmit.app.video.MediaPipeFaceAnalyzer
 import kotlinx.coroutines.delay
 
 @Composable
-private fun CameraBox(granted: Boolean, analyzer: MediaPipeFaceAnalyzer, modifier: Modifier = Modifier) {
+private fun CameraBox(granted: Boolean, onFrame: (ImageProxy) -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
@@ -56,7 +57,7 @@ private fun CameraBox(granted: Boolean, analyzer: MediaPipeFaceAnalyzer, modifie
         contentAlignment = Alignment.Center,
     ) {
         if (granted) {
-            CameraPreview(Modifier.fillMaxSize(), onFrame = { analyzer.analyze(it) })
+            CameraPreview(Modifier.fillMaxSize(), onFrame = onFrame)
         } else {
             Text(
                 "Camera permission required",
@@ -68,11 +69,24 @@ private fun CameraBox(granted: Boolean, analyzer: MediaPipeFaceAnalyzer, modifie
 }
 
 @Composable
+private fun ServerStatusRow(controller: FaceAnalysisController) {
+    InfoRow(
+        "Face server",
+        when {
+            controller.serverOk -> "Connected (gx10)"
+            else -> "Awaiting server…"
+        },
+        valueColor = if (controller.serverOk) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
 fun FaceCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val permission = rememberPermissionState(Manifest.permission.CAMERA)
-    val analyzer = remember { MediaPipeFaceAnalyzer(context) }
-    DisposableEffect(Unit) { onDispose { analyzer.close() } }
+    val controller = remember { FaceAnalysisController(context, vm.settingsStore, scope) }
+    val frame by controller.frame
 
     val steps = listOf("Neutral face", "Big smile", "Raise your eyebrows", "Close your eyes tightly")
     var step by remember { mutableIntStateOf(0) }
@@ -80,9 +94,8 @@ fun FaceCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
 
     LaunchedEffect(Unit) {
         while (true) {
-            val f = analyzer.current()
-            if (f.detected) {
-                samples.add(f.asymmetry)
+            if (frame.detected) {
+                samples.add(frame.asymmetry)
                 if (samples.size > 40) samples.removeAt(0)
             }
             delay(120)
@@ -106,21 +119,22 @@ fun FaceCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("Step ${step + 1} of ${steps.size}")
-                Text("Live model: MediaPipe FaceMesh", style = MaterialTheme.typography.bodySmall)
+                Text("Analyzed on gx10", style = MaterialTheme.typography.bodySmall)
             }
             LinearProgressIndicator(
                 progress = { (step + 1f) / steps.size },
                 modifier = Modifier.fillMaxWidth(),
             )
-            CameraBox(granted = permission.granted, analyzer = analyzer, modifier = Modifier.fillMaxWidth().height(280.dp))
+            CameraBox(granted = permission.granted, onFrame = controller::handle, modifier = Modifier.fillMaxWidth().height(280.dp))
             Text(steps[step], style = MaterialTheme.typography.headlineSmall)
             Text(
                 "Hold the pose while the app records your neutral baseline.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (analyzer.current().detected) {
-                InfoRow("Live asymmetry", "${(analyzer.current().asymmetry * 100).toInt()}%")
+            ServerStatusRow(controller)
+            if (frame.detected) {
+                InfoRow("Live asymmetry", "${(frame.asymmetry * 100).toInt()}%")
             }
 
             if (!permission.granted) {
@@ -150,17 +164,17 @@ fun FaceCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
 @Composable
 fun FaceTestScreen(vm: AssessmentViewModel, nav: NavController) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val permission = rememberPermissionState(Manifest.permission.CAMERA)
-    val analyzer = remember { MediaPipeFaceAnalyzer(context) }
-    DisposableEffect(Unit) { onDispose { analyzer.close() } }
+    val controller = remember { FaceAnalysisController(context, vm.settingsStore, scope) }
+    val frame by controller.frame
 
-    var frame by remember { mutableStateOf(FaceFrame(false, 0f, 0f, 0f)) }
     var peak by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
         while (true) {
-            frame = analyzer.current()
-            if (frame.detected) peak = maxOf(peak, frame.asymmetry)
+            val f = controller.frame.value
+            if (f.detected) peak = maxOf(peak, f.asymmetry)
             delay(120)
         }
     }
@@ -179,7 +193,8 @@ fun FaceTestScreen(vm: AssessmentViewModel, nav: NavController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Smile and show your teeth", style = MaterialTheme.typography.titleMedium)
-            CameraBox(granted = permission.granted, analyzer = analyzer, modifier = Modifier.fillMaxWidth().height(260.dp))
+            CameraBox(granted = permission.granted, onFrame = controller::handle, modifier = Modifier.fillMaxWidth().height(260.dp))
+            ServerStatusRow(controller)
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(

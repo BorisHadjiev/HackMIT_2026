@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     speaker_threshold: float = 0.75
     speaker_embedding_path: str = "speaker_embedding.npy"
 
+    # Server-side face analysis (MediaPipe + trained LR).
+    face_model_path: str = "models/face/face_landmarker.task"
+    face_lr_path: str = "models/face/lr_model.json"
+
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
     max_body_bytes: int = 16384

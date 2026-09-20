@@ -1,6 +1,8 @@
 package com.hackmit.app.ui.screens
 
+import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +38,7 @@ import com.hackmit.app.ui.components.severityColor
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 
 @Composable
 fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavController) {
@@ -63,23 +66,50 @@ fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavControlle
 
     fun startPlayback(asset: String) {
         releasePlayer()
+        val bytes = runCatching { context.assets.open("audio/$asset").readBytes() }.getOrNull()
+        if (bytes == null) {
+            Log.e("SlurDemo", "could not read asset $asset")
+            message = "Could not read audio."
+            return
+        }
+        val file = File(context.cacheDir, "demo_${System.currentTimeMillis()}.wav").apply { writeBytes(bytes) }
         val p = runCatching {
-            val afd = context.assets.openFd("audio/$asset")
             MediaPlayer().apply {
-                setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                setDataSource(file.absolutePath)
                 setVolume(1f, 1f)
-                prepare()
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
             }
-        }.getOrNull() ?: run {
-            message = "Could not play audio."
+        }.getOrNull()
+        if (p == null) {
+            Log.e("SlurDemo", "could not create MediaPlayer")
+            message = "Could not create player."
             return
         }
         player = p
+        p.setOnPreparedListener {
+            Log.d("SlurDemo", "prepared, starting ($asset)")
+            p.start()
+        }
         p.setOnCompletionListener {
+            Log.d("SlurDemo", "completed")
             playing = false
             nowIndex = (results.size - 1).coerceAtLeast(0)
         }
-        p.start()
+        p.setOnErrorListener { _, what, extra ->
+            Log.e("SlurDemo", "playback error what=$what extra=$extra")
+            playing = false
+            message = "Playback error ($what/$extra)"
+            true
+        }
+        runCatching { p.prepareAsync() }.onFailure {
+            Log.e("SlurDemo", "prepareAsync threw", it)
+            message = "Could not prepare audio."
+        }
         playing = true
         tickerJob = scope.launch {
             while (true) {

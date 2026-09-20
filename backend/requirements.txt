@@ -4,3 +4,5 @@ httpx>=0.28
 pydantic-settings>=2.7
 aiosqlite>=0.20
 websockets>=13
+# server-side face analysis (MediaPipe FaceLandmarker + OpenCV decode)
+mediapipe>=0.10

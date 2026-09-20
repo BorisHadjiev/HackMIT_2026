@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 
 /**
  * Foreground-only continuous speech monitor. Owns capture, VAD gating, on-device
@@ -79,6 +80,8 @@ class SpeechMonitor(
     @Volatile
     private var calibrating = false
 
+    private val enrollBuffer = ByteArrayOutputStream()
+
     /** Prefer Deepgram's server-side VAD when connected; fall back to the local VAD. */
     private fun effectiveSpeechActive(): Boolean = if (dgConnected) dgSpeechActive else vad.speechActive
 
@@ -112,12 +115,19 @@ class SpeechMonitor(
         baselineSamples = mutableListOf()
         calibrating = true
         val route = DeepgramRouter.forStream(settings)
+        enrollBuffer.reset()
         begin(route.token, route.endpoint)
         delay(durationMs)
         calibrating = false
         val samples = baselineSamples ?: emptyList()
         baselineSamples = null
         end()
+        val enrollPcm = enrollBuffer.toByteArray()
+        enrollBuffer.reset()
+        if (enrollPcm.size >= 16000) {
+            Log.d(TAG, "auto enrolling speaker voiceprint…")
+            Speaker.enroll(settings, enrollPcm)
+        }
         val profile = BaselineStore.fromSamples(samples)
         Log.d(TAG, "baseline samples=${profile.sampleCount}")
         if (profile.sampleCount < MIN_BASELINE_SAMPLES) return null
@@ -198,6 +208,7 @@ class SpeechMonitor(
                     // Stream ALL audio to Deepgram and let Deepgram's server-side VAD
                     // decide speech; the local energy VAD is too fragile for gating.
                     deepgram?.send(AudioCapture.toBytes(frame))
+                    if (calibrating) enrollBuffer.write(AudioCapture.toBytes(frame))
                     sentFrames++
                     windowFrames++
                     if (effectiveSpeechActive()) windowSpeechFrames++

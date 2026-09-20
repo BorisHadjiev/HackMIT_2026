@@ -20,6 +20,7 @@ from websockets.exceptions import ConnectionClosed
 from .agent import AgentClient
 from .config import Settings, get_settings
 from .database import Database
+from .face import FaceServer
 from .linq import LinqClient, LinqError
 from .models import (
     AgentRequest,
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
         app.state.tts = TtsEngine(settings)
         app.state.agent = AgentClient(settings)
         app.state.speaker = SpeakerGate(settings)
+        app.state.face = FaceServer(settings.face_model_path, settings.face_lr_path)
         log.info(
             "gateway ready: linq=%s deepgram=%s recipients=%d auth=%s db=%s",
             settings.linq_configured,
@@ -324,6 +326,16 @@ async def speaker_status(request: Request, x_alert_gateway_token: str | None = H
         "enrolled": sp._embedding is not None,
         "threshold": settings.speaker_threshold,
     }
+
+
+@app.post("/v1/face/analyze")
+async def face_analyze(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="empty image")
+    return await asyncio.to_thread(request.app.state.face.analyze, body)
 
 
 @app.get("/v1/linq/status")

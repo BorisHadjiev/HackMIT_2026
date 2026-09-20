@@ -109,6 +109,7 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                     InfoRow("Status", if (state.running) "Monitoring" else "Stopped")
                     InfoRow("Speech", if (state.speechActive) "Detected" else "Silence")
                     InfoRow("Deepgram", state.deepgramStatus)
+                    state.aiScore?.let { InfoRow("AI slur score (WavLM)", "${(it * 100).toInt()}%") }
                     InfoRow("Baseline", if (hasBaseline) "Ready" else "Not calibrated")
                     state.lastError?.let { InfoRow("Last error", it) }
                 }

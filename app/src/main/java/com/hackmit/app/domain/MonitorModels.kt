@@ -92,6 +92,7 @@ data class MonitorState(
     val transcript: String = "",
     val features: FeatureVector = FeatureVector(),
     val score: Float = 0f,
+    val aiScore: Float? = null,
     val level: AlertLevel = AlertLevel.NORMAL,
     val reasons: List<String> = emptyList(),
     val deepgramStatus: String = "Idle",

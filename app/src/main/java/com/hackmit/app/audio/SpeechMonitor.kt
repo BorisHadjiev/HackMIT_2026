@@ -82,6 +82,11 @@ class SpeechMonitor(
 
     private val enrollBuffer = ByteArrayOutputStream()
 
+    // Rolling buffer of the last few seconds of PCM for server-side AI scoring.
+    private val recentPcm = ArrayDeque<ByteArray>()
+    private var recentBytes = 0
+    private var aiJob: Job? = null
+
     /** Prefer Deepgram's server-side VAD when connected; fall back to the local VAD. */
     private fun effectiveSpeechActive(): Boolean = if (dgConnected) dgSpeechActive else vad.speechActive
 
@@ -101,7 +106,7 @@ class SpeechMonitor(
         val sensitivity = settings.alertSensitivity.first()
         detector = baseline?.let { SlurDetector(it, sensitivity) }
         val route = DeepgramRouter.forStream(settings)
-        begin(route.token, route.endpoint)
+        begin(route.token, route.endpoint, withAi = true)
     }
 
     fun stopMonitoring() {
@@ -137,7 +142,7 @@ class SpeechMonitor(
         return profile
     }
 
-    private fun begin(apiKey: String, endpoint: String = DeepgramStream.DEFAULT_ENDPOINT) {
+    private fun begin(apiKey: String, endpoint: String = DeepgramStream.DEFAULT_ENDPOINT, withAi: Boolean = false) {
         running = true
         vad.reset()
         extractor.reset()
@@ -147,6 +152,8 @@ class SpeechMonitor(
         sentFrames = 0L
         dgConnected = false
         dgSpeechActive = false
+        recentPcm.clear()
+        recentBytes = 0
         latestTranscript = ""
         windowFrames = 0
         windowSpeechFrames = 0
@@ -169,10 +176,13 @@ class SpeechMonitor(
             _state.value = _state.value.copy(lastError = "Microphone unavailable")
         }
         processingJob = scope.launch { processLoop() }
+        if (withAi) startAiScore()
     }
 
     private fun end() {
         running = false
+        aiJob?.cancel()
+        aiJob = null
         capture?.stop()
         capture = null
         deepgram?.stop()
@@ -207,8 +217,14 @@ class SpeechMonitor(
                     extractor.add(frame)
                     // Stream ALL audio to Deepgram and let Deepgram's server-side VAD
                     // decide speech; the local energy VAD is too fragile for gating.
-                    deepgram?.send(AudioCapture.toBytes(frame))
-                    if (calibrating) enrollBuffer.write(AudioCapture.toBytes(frame))
+                    val frameBytes = AudioCapture.toBytes(frame)
+                    deepgram?.send(frameBytes)
+                    if (calibrating) enrollBuffer.write(frameBytes)
+                    recentPcm.addLast(frameBytes)
+                    recentBytes += frameBytes.size
+                    while (recentBytes > RECENT_PCM_BYTES && recentPcm.size > 1) {
+                        recentBytes -= recentPcm.removeFirst().size
+                    }
                     sentFrames++
                     windowFrames++
                     if (effectiveSpeechActive()) windowSpeechFrames++
@@ -220,6 +236,63 @@ class SpeechMonitor(
                 }
             }
         }
+    }
+
+    private fun startAiScore() {
+        aiJob?.cancel()
+        aiJob = scope.launch {
+            while (isActive) {
+                delay(AI_INTERVAL_MS)
+                if (!running) break
+                if (effectiveSpeechActive()) {
+                    val wav = buildRecentWav()
+                    if (wav != null) {
+                        val score = SlurServer.analyze(settings, wav)
+                        if (score != null) {
+                            _state.value = _state.value.copy(aiScore = score)
+                            Log.d(TAG, "ai score: %.2f".format(score))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun buildRecentWav(): ByteArray? {
+        if (recentPcm.isEmpty()) return null
+        val data = ByteArray(recentBytes)
+        var offset = 0
+        for (chunk in recentPcm) {
+            chunk.copyInto(data, offset)
+            offset += chunk.size
+        }
+        val header = ByteArrayOutputStream()
+        header.write("RIFF".toByteArray(Charsets.US_ASCII))
+        writeLeInt(header, 36 + data.size)
+        header.write("WAVE".toByteArray(Charsets.US_ASCII))
+        header.write("fmt ".toByteArray(Charsets.US_ASCII))
+        writeLeInt(header, 16)
+        writeLeShort(header, 1)   // PCM
+        writeLeShort(header, 1)   // mono
+        writeLeInt(header, 16_000)
+        writeLeInt(header, 32_000)
+        writeLeShort(header, 2)   // block align
+        writeLeShort(header, 16)  // bits
+        header.write("data".toByteArray(Charsets.US_ASCII))
+        writeLeInt(header, data.size)
+        return header.toByteArray() + data
+    }
+
+    private fun writeLeInt(out: ByteArrayOutputStream, value: Int) {
+        out.write(value and 0xFF)
+        out.write((value shr 8) and 0xFF)
+        out.write((value shr 16) and 0xFF)
+        out.write((value shr 24) and 0xFF)
+    }
+
+    private fun writeLeShort(out: ByteArrayOutputStream, value: Int) {
+        out.write(value and 0xFF)
+        out.write((value shr 8) and 0xFF)
     }
 
     private fun computeAndUpdate() {
@@ -321,6 +394,8 @@ class SpeechMonitor(
         private const val HOP_FRAMES = 62 // ~2 s at 512 samples / 16 kHz
         private const val MIN_BASELINE_SAMPLES = 5
         private const val LEXICAL_WINDOW_MS = 10_000L
+        private const val AI_INTERVAL_MS = 5_000L
+        private const val RECENT_PCM_BYTES = 16_000 * 4 * 2 // last 4 s of 16k PCM16
         private val FILLERS = setOf("uh", "um", "er", "ah", "hmm", "like", "you", "know")
     }
 }

@@ -12,6 +12,7 @@ import com.hackmit.app.alert.AlertDeliveryStatus
 import com.hackmit.app.alert.AlertSource
 import com.hackmit.app.di.AppContainer
 import com.hackmit.app.domain.Assessment
+import com.hackmit.app.domain.Metric
 import com.hackmit.app.domain.ModuleResult
 import com.hackmit.app.domain.ModuleType
 import com.hackmit.app.sensor.BleScanReadiness
@@ -112,6 +113,55 @@ class AssessmentViewModel(private val container: AppContainer) : ViewModel() {
         speechBaselineWpm = null
         motorBaseline = null
         alertDelivery = AlertDelivery()
+    }
+
+    /**
+     * Debug mode 2: fill all modules with a realistic mock result so the end-of-flow
+     * features (summary, risk check, alerts) can be tested without running the tests.
+     */
+    fun submitMock() {
+        val now = System.currentTimeMillis()
+        submit(
+            ModuleResult(
+                type = ModuleType.FACE,
+                score = 0.78f,
+                metrics = listOf(
+                    Metric("Mouth asymmetry", "0.071", 0.78f),
+                    Metric("Eye asymmetry", "0.043", 0.55f),
+                ),
+                summary = "Asymmetry detected",
+                usedMockData = true,
+                timestampMs = now,
+            ),
+        )
+        submit(
+            ModuleResult(
+                type = ModuleType.SPEECH,
+                score = 0.85f,
+                metrics = listOf(
+                    Metric("Speech rate", "88 wpm", 0.4f),
+                    Metric("Jitter", "0.9%", 0.8f),
+                    Metric("Shimmer", "11%", 0.85f),
+                ),
+                summary = "Slurring detected",
+                usedMockData = true,
+                timestampMs = now + 1,
+            ),
+        )
+        submit(
+            ModuleResult(
+                type = ModuleType.MOTOR,
+                score = 0.40f,
+                metrics = listOf(
+                    Metric("Left arm", "88°", 0.0f),
+                    Metric("Right arm", "52°", 0.6f),
+                    Metric("Angle difference", "36°", 0.9f),
+                ),
+                summary = "Uneven arm raise",
+                usedMockData = true,
+                timestampMs = now + 2,
+            ),
+        )
     }
 
     /**

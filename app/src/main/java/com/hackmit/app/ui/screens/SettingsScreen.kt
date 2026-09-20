@@ -131,6 +131,7 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val storedMac by vm.settingsStore.sensorMac.collectAsState(initial = "")
     val storedTransportName by vm.settingsStore.sensorTransport.collectAsState(initial = "MOCK")
     val debugMode by vm.settingsStore.debugMode.collectAsState(initial = true)
+    val debugMockSummary by vm.settingsStore.debugMockSummary.collectAsState(initial = true)
     val storedContact by vm.settingsStore.emergencyContact.collectAsState(initial = "")
     val storedSms by vm.settingsStore.alertSmsEnabled.collectAsState(initial = false)
     val cfg by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
@@ -358,6 +359,25 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                         Switch(
                             checked = debugMode,
                             onCheckedChange = { scope.launch { vm.settingsStore.setDebugMode(it) } },
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Debug mode 2 — mock summary", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Home shows 'Skip to mock results' to test the end-of-flow " +
+                                    "features without running the FAST tests.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = debugMockSummary,
+                            onCheckedChange = { scope.launch { vm.settingsStore.setDebugMockSummary(it) } },
                         )
                     }
                     Text("Arduino IMU", style = MaterialTheme.typography.titleMedium)

@@ -38,6 +38,7 @@ class SettingsStore(private val context: Context) {
     private val keySleepStart = stringPreferencesKey("sleep_hours_start")
     private val keySleepEnd = stringPreferencesKey("sleep_hours_end")
     private val keyDebug = booleanPreferencesKey("debug_mode")
+    private val keyDebugMockSummary = booleanPreferencesKey("debug_mock_summary")
 
     val deepgramKey: Flow<String> = context.dataStore.data.map {
         it[keyDeepgram]?.takeIf { k -> k.isNotBlank() } ?: BuildConfig.DEEPGRAM_API_KEY
@@ -83,6 +84,12 @@ class SettingsStore(private val context: Context) {
      * connecting the Arduino. On by default; turn off to use the real board.
      */
     val debugMode: Flow<Boolean> = context.dataStore.data.map { it[keyDebug] ?: true }
+
+    /**
+     * Debug mode 2: show a "Skip to mock results" shortcut so end-of-flow features
+     * (summary, risk check, alerts) can be tested without running the FAST tests.
+     */
+    val debugMockSummary: Flow<Boolean> = context.dataStore.data.map { it[keyDebugMockSummary] ?: true }
 
     suspend fun setDeepgramKey(value: String) {
         context.dataStore.edit { it[keyDeepgram] = value.trim() }
@@ -150,6 +157,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setDebugMode(value: Boolean) {
         context.dataStore.edit { it[keyDebug] = value }
+    }
+
+    suspend fun setDebugMockSummary(value: Boolean) {
+        context.dataStore.edit { it[keyDebugMockSummary] = value }
     }
 
     suspend fun setAlertConfig(value: AlertConfig) {

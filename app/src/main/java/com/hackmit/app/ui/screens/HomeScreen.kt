@@ -39,6 +39,7 @@ import com.hackmit.app.ui.components.ScreenScaffold
 @Composable
 fun HomeScreen(vm: AssessmentViewModel, nav: NavController) {
     val monitorState by vm.speechMonitor.state.collectAsState()
+    val debugMock by vm.settingsStore.debugMockSummary.collectAsState(initial = true)
     ScreenScaffold(
         title = "Stroke screening",
         actions = {
@@ -122,6 +123,18 @@ fun HomeScreen(vm: AssessmentViewModel, nav: NavController) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Start full assessment")
+            }
+
+            if (debugMock) {
+                OutlinedButton(
+                    onClick = {
+                        vm.submitMock()
+                        nav.navigate(Routes.RESULTS)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Skip to mock results (debug)")
+                }
             }
 
             if (vm.results.isNotEmpty()) {

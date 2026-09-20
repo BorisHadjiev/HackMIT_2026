@@ -648,10 +648,11 @@ async def agent_stream(websocket: WebSocket) -> None:
             additional_headers={"Authorization": f"Token {settings.deepgram_api_key}"},
             open_timeout=15,
         ) as dg:
-            await dg.send(json.dumps(build_settings(settings, context)))
+            auto = websocket.query_params.get("auto") in ("1", "true", "yes")
+            # In auto mode the caller LLM speaks the report turn by turn, so don't pre-seed it.
+            await dg.send(json.dumps(build_settings(settings, context, seed_report=not auto)))
             log.info("agent stream: settings sent (llm=%s voice=%s)", settings.agent_llm_model, settings.agent_voice)
 
-            auto = websocket.query_params.get("auto") in ("1", "true", "yes")
             if auto:
                 # LLM-to-LLM: the gateway plays the caller side with Ollama + Kokoro.
                 await run_auto_caller(websocket.app.state.tts, settings, dg, websocket, context)

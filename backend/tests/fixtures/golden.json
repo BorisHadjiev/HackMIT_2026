@@ -1,0 +1,12 @@
+{
+  "face": {
+    "score": 0.3212,
+    "score_cal": 0.3098,
+    "feats": {
+      "mouth_perp_abs": 0.010996,
+      "eye_open_asym": 0.004587,
+      "cheek_perp_abs": 0.000448,
+      "brow_perp_abs": 0.002748
+    }
+  }
+}

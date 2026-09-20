@@ -28,3 +28,7 @@ secrets.properties
 __pycache__/
 *.pyc
 .venv/
+
+# face_lab local secrets
+tools/face_lab/.env
+tools/face_lab/.venv/

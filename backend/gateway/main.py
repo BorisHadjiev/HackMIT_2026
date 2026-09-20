@@ -347,6 +347,28 @@ async def face_analyze(request: Request, x_alert_gateway_token: str | None = Hea
     return await asyncio.to_thread(request.app.state.face.analyze, body)
 
 
+@app.post("/v1/face/debug")
+async def face_debug(
+    request: Request,
+    x_alert_gateway_token: str | None = Header(default=None),
+    x_face_debug_token: str | None = Header(default=None),
+) -> dict:
+    """Proof-check view: all landmarks + geometry + LR intermediates for one frame.
+
+    Disabled unless FACE_DEBUG_ENABLED=true. Optionally also requires FACE_DEBUG_TOKEN.
+    """
+    settings: Settings = request.app.state.settings
+    if not settings.face_debug_enabled:
+        raise HTTPException(status_code=404, detail="face debug disabled")
+    _authorize(settings, x_alert_gateway_token)
+    if settings.face_debug_token and not hmac.compare_digest(x_face_debug_token or "", settings.face_debug_token):
+        raise HTTPException(status_code=401, detail="invalid face debug token")
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="empty image")
+    return await asyncio.to_thread(request.app.state.face.analyze_debug, body)
+
+
 @app.post("/v1/slur/analyze")
 async def slur_analyze(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
     settings: Settings = request.app.state.settings

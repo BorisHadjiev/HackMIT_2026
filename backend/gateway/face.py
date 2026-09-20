@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 
 import cv2
 import mediapipe as mp
@@ -22,9 +23,28 @@ LID_UP_R, LID_LO_R = 386, 374
 
 KEYS = ["mouth_perp_abs", "eye_open_asym", "cheek_perp_abs", "brow_perp_abs"]
 
+KEY_INDICES = {
+    "eye_l": EYE_L,
+    "eye_r": EYE_R,
+    "mouth_l": MOUTH_L,
+    "mouth_r": MOUTH_R,
+    "cheek_l": CHEEK_L,
+    "cheek_r": CHEEK_R,
+    "brow_l": BROW_L,
+    "brow_r": BROW_R,
+    "lid_ul": LID_UP_L,
+    "lid_ll": LID_LO_L,
+    "lid_ur": LID_UP_R,
+    "lid_lr": LID_LO_R,
+}
 
-def feats(lm: np.ndarray) -> dict:
-    """Corrected geometry (features_v2): eye-line axis, iod-normalized perp offsets."""
+
+def geometry(lm: np.ndarray) -> dict | None:
+    """Corrected geometry (features_v2): eye-line axis, iod-normalized perp offsets.
+
+    Returns the full intermediate geometry so both `feats()` and the debug view
+    derive from one source of truth.
+    """
     mid = (lm[EYE_L] + lm[EYE_R]) / 2.0
     ev = lm[EYE_R] - lm[EYE_L]
     iod = float(np.hypot(*ev))
@@ -39,12 +59,33 @@ def feats(lm: np.ndarray) -> dict:
     open_l = float(np.hypot(*(lm[LID_UP_L] - lm[LID_LO_L])) / iod)
     open_r = float(np.hypot(*(lm[LID_UP_R] - lm[LID_LO_R])) / iod)
     eye_open_asym = abs(open_l - open_r) / (open_l + open_r) if open_l + open_r else 0.0
+
+    mouth_perp = [perp(MOUTH_L), perp(MOUTH_R)]
+    cheek_perp = [perp(CHEEK_L), perp(CHEEK_R)]
+    brow_perp = [perp(BROW_L), perp(BROW_R)]
     return {
-        "mouth_perp_abs": abs(perp(MOUTH_L) - perp(MOUTH_R)),
-        "eye_open_asym": eye_open_asym,
-        "cheek_perp_abs": abs(perp(CHEEK_L) - perp(CHEEK_R)),
-        "brow_perp_abs": abs(perp(BROW_L) - perp(BROW_R)),
+        "mid": mid.tolist(),
+        "u": u.tolist(),
+        "v": v.tolist(),
+        "iod": iod,
+        "mouth_perp": mouth_perp,
+        "cheek_perp": cheek_perp,
+        "brow_perp": brow_perp,
+        "eye_open_l": open_l,
+        "eye_open_r": open_r,
+        "feats": {
+            "mouth_perp_abs": abs(mouth_perp[0] - mouth_perp[1]),
+            "eye_open_asym": eye_open_asym,
+            "cheek_perp_abs": abs(cheek_perp[0] - cheek_perp[1]),
+            "brow_perp_abs": abs(brow_perp[0] - brow_perp[1]),
+        },
     }
+
+
+def feats(lm: np.ndarray) -> dict | None:
+    """The four LR features (kept for backward compatibility)."""
+    g = geometry(lm)
+    return None if g is None else g["feats"]
 
 
 class FaceServer:
@@ -116,5 +157,53 @@ class FaceServer:
                 "quality": round(quality, 3),
                 "mouth": round(f["mouth_perp_abs"], 5),
                 "eye": round(f["eye_open_asym"], 5),
+                "threshold": self._threshold,
+            }
+
+    def analyze_debug(self, jpeg: bytes) -> dict:
+        """Debug view: same model/scoring as analyze(), plus all landmarks + intermediates.
+
+        Only used by the token-gated /v1/face/debug route; production behavior is
+        unchanged and the app never calls this.
+        """
+        t0 = time.perf_counter()
+        with self._lock:
+            img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                return {"detected": False, "error": "bad image"}
+            h, w = img.shape[:2]
+            rgb = np.ascontiguousarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            res = self._landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
+            server_ms = (time.perf_counter() - t0) * 1000.0
+            if not res.face_landmarks:
+                return {"detected": False, "image_w": w, "image_h": h, "server_ms": round(server_ms, 2)}
+            lm = np.array([[p.x, p.y] for p in res.face_landmarks[0]])
+            g = geometry(lm)
+            if g is None:
+                return {"detected": False, "image_w": w, "image_h": h, "server_ms": round(server_ms, 2)}
+
+            f = g["feats"]
+            z = (np.array([f[k] for k in KEYS]) - self._mean) / self._std
+            logit = float(np.dot(self._coef, z)) + self._intercept
+            score = 1.0 / (1.0 + np.exp(-logit))
+            score_cal = 1.0 / (1.0 + np.exp(-logit / self._temperature))
+            quality = self._quality(lm)
+
+            return {
+                "detected": True,
+                "image_w": w,
+                "image_h": h,
+                "server_ms": round(server_ms, 2),
+                "landmark_count": int(lm.shape[0]),
+                "landmarks": [[round(float(x), 5), round(float(y), 5)] for x, y in lm],
+                "key_indices": KEY_INDICES,
+                "geometry": g,
+                "feats": {k: round(float(v), 6) for k, v in f.items()},
+                "z": [round(float(v), 4) for v in z],
+                "logit": round(logit, 4),
+                "temperature": self._temperature,
+                "score": round(score, 4),
+                "score_cal": round(score_cal, 4),
+                "quality": round(quality, 3),
                 "threshold": self._threshold,
             }

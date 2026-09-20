@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # Server-side face analysis (MediaPipe + trained LR).
     face_model_path: str = "models/face/face_landmarker.task"
     face_lr_path: str = "models/face/lr_model.json"
+    # Debug view: token-gated /v1/face/debug returns all landmarks + intermediates.
+    # Keep disabled in production; enable only for the local proof-check harness.
+    face_debug_enabled: bool = False
+    face_debug_token: str = ""
 
     # Server-side slur classification (WavLM embedding + SSL-only LR).
     slur_model_path: str = "models/slur/slur_classifier_ssl_pathological.json"

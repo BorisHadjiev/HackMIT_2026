@@ -1,0 +1,21 @@
+[Unit]
+# The App Lab container cannot reach BlueZ: its generated compose file mounts no
+# /run/dbus/system_bus_socket and the container is not in the bluetooth group, so the
+# BLE bridge has to run on the Debian host instead. Installed as a systemd *user* unit
+# because the arduino user has no passwordless sudo; lingering is enabled for that user,
+# so this starts on a cold power-bank boot with no PC and no login.
+Description=StrokeSense BLE bridge (Nordic UART over BlueZ)
+Documentation=https://github.com/arduino/uno-q
+After=dbus.socket
+
+[Service]
+Type=simple
+WorkingDirectory=/home/arduino/ArduinoApps/strokesense
+ExecStart=/usr/bin/python3 /home/arduino/ArduinoApps/strokesense/python/main.py
+# main.py already waits up to 45 s for bluetoothd and retries bring-up ten times, but a
+# hard restart covers the case where the adapter disappears while we are advertising.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

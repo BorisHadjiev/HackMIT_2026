@@ -132,6 +132,10 @@ The installed package is `com.hackmit.strokesense`; the internal Kotlin namespac
 
 ## Connecting the Arduino IMU
 
+Firmware for the **Arduino UNO Q** lives in [`arduino/`](arduino/) (App Lab layout).
+Bluetooth is the UNO Q's **onboard BLE** (Qualcomm / Linux BlueZ). There is **no
+HC-05** and no Classic Bluetooth SPP.
+
 > ### The board will NOT appear in Android's Bluetooth settings
 >
 > The UNO Q advertises as a **BLE-only GATT peripheral** named `StrokeSense`. Android's
@@ -140,11 +144,72 @@ The installed package is `com.hackmit.strokesense`; the internal Kotlin namespac
 > Discovery happens **inside this app**. This is the single biggest source of confusion
 > with this setup.
 
-Board firmware and the BLE bridge live in the companion repo `raise-hands-imu` (MCU
-sketch + a Python bridge that runs on the UNO Q's Debian host as a systemd user unit).
-Make sure the board is powered and the bridge is advertising before scanning.
+### Board files (`arduino/`)
 
-### Tap sequence
+| Path | Runs where | Role |
+| --- | --- | --- |
+| `arduino/sketch/sketch.ino` | STM32 MCU | IMUs, buzzers, `START` / `STOP` / `SETCOOLDOWN` / `SLEEP` latch |
+| `arduino/python/main.py` | Debian **host** | Nordic UART BLE bridge (`StrokeSense`) |
+| `arduino/systemd/strokesense-ble.service` | host systemd **user** unit | starts the bridge at boot |
+
+The UNO Q is a Debian computer *and* an STM32 on one board. The MCU has no radio.
+`python/main.py` must run on the **host**. The App Lab container **cannot do BLE**:
+its compose file mounts no `/run/dbus/system_bus_socket`, is not on the host network,
+and omits the `bluetooth` group. BLE errors in the App Lab log are expected if that
+copy of `main.py` is left running; the host unit is what the phone talks to.
+
+### Flash the MCU (Arduino App Lab)
+
+1. Open the project in **Arduino App Lab** on the UNO Q.
+2. Paste or open `arduino/sketch/sketch.ino` over App Lab's `sketch.ino` (Ctrl+A, paste), then upload.
+3. Hold both IMUs **still and down** during the ~2 s calibration at boot.
+4. You can also drop `arduino/python/main.py` into the App Lab `python/` folder, but **do not rely on App Lab to serve BLE**.
+
+USB serial stays at **115200** and accepts the same commands as BLE (useful without a phone).
+
+### Host BLE bridge (required)
+
+Stage the `arduino` Python package into the host user site once (and again if `~/.local` is wiped). On the board, as user `arduino`:
+
+```sh
+docker ps                     # find the App Lab container name
+docker cp <container>:/usr/local/lib/python3.13/site-packages \
+    ~/.local/lib/python3.13/site-packages
+# the container's PyGObject must NOT shadow the host one
+rm -rf ~/.local/lib/python3.13/site-packages/gi \
+       ~/.local/lib/python3.13/site-packages/pygobject-*.dist-info
+python3 -c "from arduino.app_utils import Bridge; import gi; print(gi.__file__)"
+# gi must resolve under /usr/lib/python3/dist-packages
+```
+
+Install the systemd **user** unit so the bridge starts on a cold boot with no PC attached (`loginctl enable-linger arduino`). This is **not** the same as App Lab "run at startup" — use `strokesense-ble.service` on the host:
+
+```sh
+install -Dm644 arduino/systemd/strokesense-ble.service \
+    /home/arduino/.config/systemd/user/strokesense-ble.service
+export XDG_RUNTIME_DIR=/run/user/1000
+systemctl --user daemon-reload
+systemctl --user enable --now strokesense-ble.service
+loginctl enable-linger arduino
+```
+
+The unit runs `/usr/bin/python3 /home/arduino/ArduinoApps/strokesense/python/main.py`
+(`Restart=always`). Copy `arduino/python/main.py` to that path on the board (or point
+`ExecStart` at wherever you placed it).
+
+```sh
+export XDG_RUNTIME_DIR=/run/user/1000
+systemctl --user status strokesense-ble.service
+journalctl --user -u strokesense-ble.service -o cat -f
+```
+
+A clean bring-up logs `BLE advertising as StrokeSense` and `MCU link live: ANG,...`.
+The advertised name is `StrokeSense`. This board's MAC is `14:B5:CD:F3:98:71` (per-board;
+rescan on other hardware).
+
+### Phone: Mock vs Uno Q BLE
+
+Make sure the board is powered and `strokesense-ble.service` is advertising before scanning.
 
 1. **Settings** (gear icon on Home) → scroll to **Arduino IMU**.
 2. Tap **Uno Q BLE** (or **Mock data**). There is one exclusive choice — no
@@ -228,15 +293,17 @@ is skipped rather than treated as zero.
 
 ### No hardware?
 
-Leave **Use mock sensors** on. `MockSensorSource` synthesises a plausible two-arm raise,
-and the motor test screen has a **Simulate uneven arm raise** switch that makes the left
-arm lag so a positive screen can be demoed.
+Stay on **Mock data** in Settings → Arduino IMU (do not tap **Uno Q BLE**).
+`MockSensorSource` synthesises a plausible two-arm raise, and the motor test screen has
+a **Simulate uneven arm raise** switch that makes the left arm lag so a positive screen
+can be demoed.
 
 ### Cold-boot recovery is set up but unvalidated
 
 On the board side, everything needed for the BLE bridge to come back by itself after a
-power-bank cold boot is configured (systemd user-unit lingering, the unit enabled, and
-`Restart=always`). **This was never empirically validated** — nobody confirmed a full
+power-bank cold boot is configured: host unit `strokesense-ble.service` (not App Lab
+"run at startup"), `loginctl enable-linger arduino`, the unit `enable`d, and
+`Restart=always`. **This was never empirically validated** — nobody confirmed a full
 unattended battery cold boot ending in a successful phone connection. Budget time to
 power-cycle the board and re-check before demoing on battery.
 
@@ -495,10 +562,9 @@ app/src/test/java/com/hackmit/app/
 backend/         FastAPI care-alert gateway + Deepgram proxy + local voice
 tools/rename.sh
 tools/slur_eval/ offline Python port of SlurDetector + dysarthria-corpus evaluation
+arduino/         UNO Q firmware (App Lab): sketch/sketch.ino, python/main.py,
+                 systemd/strokesense-ble.service — onboard BLE, not HC-05
 ```
-
-Board firmware and the BLE bridge live in a separate repo (`raise-hands-imu`): the STM32
-sketch plus the Python/BlueZ bridge that runs on the UNO Q's Debian host.
 
 ### Tech stack
 

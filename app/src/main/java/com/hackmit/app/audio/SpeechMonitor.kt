@@ -244,7 +244,7 @@ class SpeechMonitor(
             while (isActive) {
                 delay(AI_INTERVAL_MS)
                 if (!running) break
-                if (effectiveSpeechActive()) {
+                if (recentHasEnergy()) {
                     val wav = buildRecentWav()
                     if (wav != null) {
                         val score = SlurServer.analyze(settings, wav)
@@ -256,6 +256,23 @@ class SpeechMonitor(
                 }
             }
         }
+    }
+
+    private fun recentHasEnergy(): Boolean {
+        if (recentBytes < 16_000) return false // need >= 0.5 s
+        var sum = 0.0
+        var n = 0
+        for (chunk in recentPcm) {
+            var i = 0
+            while (i + 1 < chunk.size) {
+                val s = (((chunk[i + 1].toInt() and 0xFF) shl 8) or (chunk[i].toInt() and 0xFF)).toShort().toInt()
+                sum += s.toDouble() * s
+                n++
+                i += 2
+            }
+        }
+        val threshold = 0.01 * 32767.0
+        return n > 0 && sum / n > threshold * threshold
     }
 
     private fun buildRecentWav(): ByteArray? {

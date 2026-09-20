@@ -130,6 +130,7 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val storedProxy by vm.settingsStore.deepgramProxyUrl.collectAsState(initial = "")
     val storedMac by vm.settingsStore.sensorMac.collectAsState(initial = "")
     val storedTransportName by vm.settingsStore.sensorTransport.collectAsState(initial = "MOCK")
+    val debugMode by vm.settingsStore.debugMode.collectAsState(initial = true)
     val storedContact by vm.settingsStore.emergencyContact.collectAsState(initial = "")
     val storedSms by vm.settingsStore.alertSmsEnabled.collectAsState(initial = false)
     val cfg by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
@@ -340,18 +341,43 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
             // Sensor source — one exclusive choice. Mock and BLE must never both look selected.
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Debug mode", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Standard simulated IMU data — every feature works without " +
+                                    "connecting the Arduino.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = debugMode,
+                            onCheckedChange = { scope.launch { vm.settingsStore.setDebugMode(it) } },
+                        )
+                    }
                     Text("Arduino IMU", style = MaterialTheme.typography.titleMedium)
                     ConnectionStatusBanner(stage = vm.sensorStage, address = vm.sensorAddress)
                     Text(
-                        "Pick one source. Mock is demo data. Uno Q is the real board " +
-                            "(StrokeSense over BLE — it will not appear in Android Bluetooth " +
-                            "settings). Scan or paste the MAC, then Connect.",
+                        if (debugMode) {
+                            "Debug mode is on — the motor module uses standard simulated data. " +
+                                "Turn off debug mode to connect the Uno Q board."
+                        } else {
+                            "Pick one source. Mock is demo data. Uno Q is the real board " +
+                                "(StrokeSense over BLE — it will not appear in Android Bluetooth " +
+                                "settings). Scan or paste the MAC, then Connect."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
-                            selected = transport == SensorTransport.MOCK,
+                            selected = debugMode || transport == SensorTransport.MOCK,
+                            enabled = !debugMode,
                             onClick = {
                                 transport = SensorTransport.MOCK
                                 vm.chooseMock()
@@ -360,6 +386,7 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                         )
                         FilterChip(
                             selected = transport == SensorTransport.BLE,
+                            enabled = !debugMode,
                             onClick = {
                                 transport = SensorTransport.BLE
                                 vm.chooseBle(address)
@@ -367,7 +394,7 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                             label = { Text("Uno Q BLE") },
                         )
                     }
-                    if (transport == SensorTransport.BLE) {
+                    if (!debugMode && transport == SensorTransport.BLE) {
                         BleBoardPicker(
                             selected = address,
                             onPick = {

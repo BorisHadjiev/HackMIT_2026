@@ -37,6 +37,7 @@ class SettingsStore(private val context: Context) {
     private val keySleepEnabled = booleanPreferencesKey("sleep_hours_enabled")
     private val keySleepStart = stringPreferencesKey("sleep_hours_start")
     private val keySleepEnd = stringPreferencesKey("sleep_hours_end")
+    private val keyDebug = booleanPreferencesKey("debug_mode")
 
     val deepgramKey: Flow<String> = context.dataStore.data.map {
         it[keyDeepgram]?.takeIf { k -> k.isNotBlank() } ?: BuildConfig.DEEPGRAM_API_KEY
@@ -76,6 +77,12 @@ class SettingsStore(private val context: Context) {
             end = it[keySleepEnd]?.takeIf(String::isNotBlank) ?: "07:00",
         )
     }
+
+    /**
+     * Debug mode: force standard simulated IMU data so every feature works without
+     * connecting the Arduino. On by default; turn off to use the real board.
+     */
+    val debugMode: Flow<Boolean> = context.dataStore.data.map { it[keyDebug] ?: true }
 
     suspend fun setDeepgramKey(value: String) {
         context.dataStore.edit { it[keyDeepgram] = value.trim() }
@@ -139,6 +146,10 @@ class SettingsStore(private val context: Context) {
             it[keySleepStart] = value.start.trim()
             it[keySleepEnd] = value.end.trim()
         }
+    }
+
+    suspend fun setDebugMode(value: Boolean) {
+        context.dataStore.edit { it[keyDebug] = value }
     }
 
     suspend fun setAlertConfig(value: AlertConfig) {

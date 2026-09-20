@@ -124,6 +124,14 @@ class AssessmentViewModel(private val container: AppContainer) : ViewModel() {
      * finds, which is what makes the board usable without system pairing.
      */
     suspend fun prepareMotorSensor(mockAbnormal: Boolean = false): Boolean {
+        // Debug mode: always use standard simulated IMU data — no board needed.
+        if (settingsStore.debugMode.first()) {
+            sensorRepository.select(SensorTransport.MOCK, "", mockAbnormal)
+            val connected = sensorRepository.connect()
+            stage(if (connected) SensorStage.MOCK else SensorStage.FAILED)
+            if (connected) pushBoardSettings()
+            return connected
+        }
         val useMock = settingsStore.mockSensors.first()
         val savedAddress = settingsStore.sensorMac.first().trim()
         val storedName = settingsStore.sensorTransport.first()

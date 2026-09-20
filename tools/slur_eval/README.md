@@ -19,13 +19,16 @@ port of `app/src/main/java/com/hackmit/app/audio/{SlurDetector,Dsp}.kt`.
 - Metrics: AUC (control vs dysarthric), per-feature AUC, score-vs-severity
   Spearman (pathological set).
 
-## Results
-- TORGO: AUC ≈ **0.54** (near chance; TORGO short words are mostly mild).
-- pathological: AUC ≈ **0.62**; per-feature AUCs: f0Std 0.61, hnr 0.61, pause 0.60,
-  jitter 0.60, shimmer 0.54.
+## Results (voiced-gated DSP)
+- TORGO: AUC ≈ **0.62** (control vs dysarthric, leave-speaker-out).
+- pathological: AUC ≈ **0.68**; strongest features: jitter 0.68, f0Std 0.61,
+  shimmer 0.62, hnr 0.48.
 - Severity correlation is weak/negative on the pathological set: severely
   unintelligible speech often loses voicing entirely, so pitch-based
   jitter/shimmer/HNR collapse toward zero and the detector under-scores it.
+- These numbers use the **fixed voiced-gated sub-frame DSP** (pitch/jitter/HNR
+  on voiced 40 ms frames) that shipped in the app — the earlier full-window
+  DSP scored 0.48 / 0.62.
 
 ## Validation of the DSP port
 A clean 200 Hz tone yields f0=200.0 Hz, jitter=0.000, shimmer=0.000, HNR=40 dB;

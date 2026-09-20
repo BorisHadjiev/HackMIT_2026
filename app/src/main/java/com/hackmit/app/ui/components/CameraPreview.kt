@@ -1,7 +1,10 @@
 package com.hackmit.app.ui.components
 
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCase
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
@@ -11,13 +14,15 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 
 /**
- * Live camera preview used by the face calibration/test screens.
- * Analysis is intentionally not wired yet (see MediaPipeFaceAnalyzer).
+ * Live camera preview used by the face calibration/test screens. When [onFrame]
+ * is provided, an ImageAnalysis use case feeds every frame to it (e.g. the
+ * MediaPipe face analyzer).
  */
 @Composable
 fun CameraPreview(
     modifier: Modifier = Modifier,
     lensFacing: Int = CameraSelector.LENS_FACING_FRONT,
+    onFrame: ((ImageProxy) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -34,11 +39,21 @@ fun CameraPreview(
                         val preview = Preview.Builder().build().also {
                             it.setSurfaceProvider(surfaceProvider)
                         }
+                        val useCases = mutableListOf<UseCase>(preview)
+                        if (onFrame != null) {
+                            val analysis = ImageAnalysis.Builder()
+                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .build()
+                            analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { proxy ->
+                                onFrame(proxy)
+                            }
+                            useCases += analysis
+                        }
                         provider.unbindAll()
                         provider.bindToLifecycle(
                             lifecycleOwner,
                             CameraSelector.Builder().requireLensFacing(lensFacing).build(),
-                            preview,
+                            *useCases.toTypedArray(),
                         )
                     } catch (_: Exception) {
                         // No camera / permission revoked: leave the view blank.

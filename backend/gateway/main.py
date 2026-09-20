@@ -86,6 +86,11 @@ def _split_trace(trace_id: str | None) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _to_ws_url(url: str) -> str:
+    """Deepgram base URLs are https://; websockets requires ws(s)://."""
+    return url.replace("https://", "wss://").replace("http://", "ws://")
+
+
 @app.middleware("http")
 async def limit_body_size(request: Request, call_next):
     settings = getattr(request.app.state, "settings", None)
@@ -254,7 +259,7 @@ async def deepgram_proxy(websocket: WebSocket) -> None:
 
     await websocket.accept()
     params = {k: v for k, v in websocket.query_params.items() if k.lower() != "token"}
-    dg_url = f"{settings.deepgram_base_url}?{urlencode(params)}"
+    dg_url = f"{_to_ws_url(settings.deepgram_base_url)}?{urlencode(params)}"
 
     try:
         async with ws_connect(

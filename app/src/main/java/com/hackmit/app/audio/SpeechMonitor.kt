@@ -68,10 +68,19 @@ class SpeechMonitor(
     @Volatile
     private var sentFrames = 0L
 
+    @Volatile
+    private var dgConnected = false
+
+    @Volatile
+    private var dgSpeechActive = false
+
     private var baselineSamples: MutableList<FeatureVector>? = null
 
     @Volatile
     private var calibrating = false
+
+    /** Prefer Deepgram's server-side VAD when connected; fall back to the local VAD. */
+    private fun effectiveSpeechActive(): Boolean = if (dgConnected) dgSpeechActive else vad.speechActive
 
     suspend fun refreshBaseline() {
         baseline = baselineStore.load()
@@ -126,6 +135,8 @@ class SpeechMonitor(
         drainResultChannel()
         while (pcmChannel.tryReceive().isSuccess) { /* drop stale audio */ }
         sentFrames = 0L
+        dgConnected = false
+        dgSpeechActive = false
         latestTranscript = ""
         windowFrames = 0
         windowSpeechFrames = 0
@@ -160,6 +171,8 @@ class SpeechMonitor(
         eventJob = null
         processingJob?.cancel()
         processingJob = null
+        dgConnected = false
+        dgSpeechActive = false
         _state.value = _state.value.copy(running = false, speechActive = false)
     }
 
@@ -182,12 +195,12 @@ class SpeechMonitor(
                     if (event == Vad.Event.SPEECH_START) Log.d(TAG, "speech start")
                     if (event == Vad.Event.SPEECH_END) Log.d(TAG, "speech end (sentFrames=$sentFrames)")
                     extractor.add(frame)
-                    if (vad.speechActive) {
-                        deepgram?.send(AudioCapture.toBytes(frame))
-                        sentFrames++
-                    }
+                    // Stream ALL audio to Deepgram and let Deepgram's server-side VAD
+                    // decide speech; the local energy VAD is too fragile for gating.
+                    deepgram?.send(AudioCapture.toBytes(frame))
+                    sentFrames++
                     windowFrames++
-                    if (vad.speechActive) windowSpeechFrames++
+                    if (effectiveSpeechActive()) windowSpeechFrames++
                     hopFrames++
                     if (hopFrames >= HOP_FRAMES) {
                         hopFrames = 0
@@ -200,13 +213,14 @@ class SpeechMonitor(
 
     private fun computeAndUpdate() {
         drainResultChannel()
+        val speechNow = effectiveSpeechActive()
         val hadSpeech = windowSpeechFrames > 0
         val frames = windowFrames.coerceAtLeast(1)
         val pauseRatio = 1f - (windowSpeechFrames.toFloat() / frames)
         windowFrames = 0
         windowSpeechFrames = 0
         if (!hadSpeech) {
-            _state.value = _state.value.copy(speechActive = vad.speechActive)
+            _state.value = _state.value.copy(speechActive = speechNow)
             return
         }
 
@@ -223,7 +237,7 @@ class SpeechMonitor(
 
         val assessment = if (calibrating) null else detector?.update(features)
         _state.value = _state.value.copy(
-            speechActive = vad.speechActive,
+            speechActive = speechNow,
             transcript = latestTranscript,
             features = features,
             score = assessment?.score ?: 0f,
@@ -268,10 +282,19 @@ class SpeechMonitor(
 
     private fun onDeepgramEvent(event: DeepgramEvent) {
         when (event) {
-            is DeepgramEvent.Status -> _state.value = _state.value.copy(deepgramStatus = event.text)
+            is DeepgramEvent.Status -> {
+                dgConnected = event.text == "Connected"
+                _state.value = _state.value.copy(deepgramStatus = event.text)
+            }
             is DeepgramEvent.Error -> _state.value = _state.value.copy(lastError = event.text)
-            is DeepgramEvent.SpeechStarted -> Unit
-            is DeepgramEvent.UtteranceEnd -> Unit
+            is DeepgramEvent.SpeechStarted -> {
+                dgSpeechActive = true
+                _state.value = _state.value.copy(speechActive = true)
+            }
+            is DeepgramEvent.UtteranceEnd -> {
+                dgSpeechActive = false
+                _state.value = _state.value.copy(speechActive = false)
+            }
             is DeepgramEvent.Result -> {
                 latestTranscript = event.result.transcript.ifBlank { latestTranscript }
                 if (event.result.isFinal) {

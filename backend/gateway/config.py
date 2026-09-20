@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     # Server-side slur classification (WavLM embedding + SSL-only LR).
     slur_model_path: str = "models/slur/slur_classifier_ssl_pathological.json"
+    # Per-user slur voice profile (personal-centroid mode). Single-user demo file.
+    slur_profile_path: str = "models/slur/slur_profile.json"
 
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30

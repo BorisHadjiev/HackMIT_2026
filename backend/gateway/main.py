@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
         app.state.agent = AgentClient(settings)
         app.state.speaker = SpeakerGate(settings)
         app.state.face = FaceServer(settings.face_model_path, settings.face_lr_path)
-        app.state.slur = SlurServer(settings.slur_model_path)
+        app.state.slur = SlurServer(settings.slur_model_path, settings.slur_profile_path)
         log.info(
             "gateway ready: linq=%s deepgram=%s recipients=%d auth=%s db=%s",
             settings.linq_configured,
@@ -348,6 +348,30 @@ async def slur_analyze(request: Request, x_alert_gateway_token: str | None = Hea
     if not body:
         raise HTTPException(status_code=400, detail="empty wav")
     return await asyncio.to_thread(request.app.state.slur.analyze, body)
+
+
+@app.post("/v1/slur/calibrate")
+async def slur_calibrate(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="empty wav")
+    return await asyncio.to_thread(request.app.state.slur.enroll, body)
+
+
+@app.get("/v1/slur/status")
+async def slur_status(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    return request.app.state.slur.status()
+
+
+@app.post("/v1/slur/clear")
+async def slur_clear(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    return await asyncio.to_thread(request.app.state.slur.clear)
 
 
 @app.get("/v1/linq/status")

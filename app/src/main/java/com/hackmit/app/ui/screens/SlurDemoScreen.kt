@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.hackmit.app.audio.DemoSpeech
 import com.hackmit.app.audio.DemoWindow
+import com.hackmit.app.audio.SlurResult
 import com.hackmit.app.audio.SlurServer
 import com.hackmit.app.domain.AlertLevel
 import com.hackmit.app.domain.BaselineProfile
@@ -53,7 +54,7 @@ fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavControlle
 
     var results by remember { mutableStateOf<List<DemoWindow>>(emptyList()) }
     var lastAsset by remember { mutableStateOf<String?>(null) }
-    var aiScore by remember { mutableStateOf<Float?>(null) }
+    var aiScore by remember { mutableStateOf<SlurResult?>(null) }
     var aiBusy by remember { mutableStateOf(false) }
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
     var nowIndex by remember { mutableStateOf(0) }
@@ -296,13 +297,18 @@ fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavControlle
                             onClick = { analyzeServer() },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (aiBusy) "Analyzing on gx10\u2026" else "Server AI score (WavLM)") }
-                        aiScore?.let { s ->
-                            InfoRow("AI score", "${(s * 100).toInt()}%")
+                        aiScore?.let { r ->
+                            InfoRow("AI score", "${(r.score * 100).toInt()}%")
                             InfoRow(
                                 "AI verdict",
-                                if (s >= 0.9447f) "Slurred (detected)" else "Clear",
-                                valueColor = if (s >= 0.9447f) severityColor(1f) else Color(0xFF2E7D32),
+                                when {
+                                    r.confidence == "low" -> "Low confidence"
+                                    r.detected -> "Slurred (detected)"
+                                    else -> "Clear"
+                                },
+                                valueColor = if (r.detected && r.confidence != "low") severityColor(1f) else Color(0xFF2E7D32),
                             )
+                            InfoRow("Model", if (r.mode == "personal") "Personal" else "Population")
                         }
                     }
                 }

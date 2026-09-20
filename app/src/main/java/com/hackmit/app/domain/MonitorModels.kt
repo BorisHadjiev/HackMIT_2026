@@ -94,6 +94,8 @@ data class MonitorState(
     val score: Float = 0f,
     val aiScore: Float? = null,
     val aiMode: String? = null,
+    val aiDetected: Boolean? = null,
+    val aiConfidence: String? = null,
     val level: AlertLevel = AlertLevel.NORMAL,
     val reasons: List<String> = emptyList(),
     val deepgramStatus: String = "Idle",

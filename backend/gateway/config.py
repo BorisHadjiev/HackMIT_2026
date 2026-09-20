@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     slur_model_path: str = "models/slur/slur_classifier_ssl_pathological.json"
     # Per-user slur voice profile (personal-centroid mode). Single-user demo file.
     slur_profile_path: str = "models/slur/slur_profile.json"
+    # Slur decision thresholds (balanced defaults).
+    slur_personal_threshold: float = 0.40  # personal-mode operating point
+    slur_ood_max: float = 1.2  # corpus mode abstains (low confidence) above this OOD
 
     # Transcription provider for /v1/asr/transcribe: deepgram | whisper | auto.
     asr_provider: str = "auto"
@@ -100,7 +103,8 @@ class Settings(BaseSettings):
 
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
-    max_body_bytes: int = 16384
+    # Face JPEGs and 4-16 s slur WAVs are 50-500 KB; 16 KB rejected them.
+    max_body_bytes: int = 2_000_000
 
     @property
     def allowed_recipient_set(self) -> set[str]:

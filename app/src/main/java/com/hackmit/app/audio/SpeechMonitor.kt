@@ -260,16 +260,21 @@ class SpeechMonitor(
                 if (recentHasEnergy()) {
                     val wav = buildRecentWav()
                     if (wav != null) {
-                        val score = SlurServer.analyze(settings, wav)
-                        if (score != null) {
-                            _state.value = _state.value.copy(aiScore = score)
-                            Log.d(TAG, "ai score: %.2f".format(score))
+                        val res = SlurServer.analyze(settings, wav)
+                        if (res != null) {
+                            _state.value = _state.value.copy(
+                                aiScore = res.score,
+                                aiMode = res.mode,
+                                aiDetected = res.detected,
+                                aiConfidence = res.confidence,
+                            )
+                            Log.d(TAG, "ai score: %.2f detected=%s conf=%s".format(res.score, res.detected, res.confidence))
                         }
                     }
                 } else if (_state.value.aiScore != null) {
                     // No recent audible speech: drop the stale (possibly high) score
                     // instead of freezing it, so the monitor recovers quickly.
-                    _state.value = _state.value.copy(aiScore = null)
+                    _state.value = _state.value.copy(aiScore = null, aiDetected = null, aiConfidence = null)
                     Log.d(TAG, "ai score cleared (silence)")
                 }
             }

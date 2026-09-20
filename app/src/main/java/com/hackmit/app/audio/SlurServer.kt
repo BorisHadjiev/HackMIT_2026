@@ -11,6 +11,15 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+/** Server slur verdict (personal mode is the trusted path). */
+data class SlurResult(
+    val score: Float,
+    val detected: Boolean,
+    val threshold: Float,
+    val mode: String,
+    val confidence: String,
+)
+
 /** Client for the gateway's server-side slur classifier (/v1/slur/analyze). */
 object SlurServer {
 
@@ -19,8 +28,8 @@ object SlurServer {
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    /** Posts a WAV and returns the model score in [0,1] (null if unreachable). */
-    suspend fun analyze(settings: SettingsStore, wav: ByteArray): Float? = withContext(Dispatchers.IO) {
+    /** Posts a WAV and returns the server verdict (null if unreachable). */
+    suspend fun analyze(settings: SettingsStore, wav: ByteArray): SlurResult? = withContext(Dispatchers.IO) {
         val config = settings.alertConfig.first()
         if (config.gatewayUrl.isBlank() || config.gatewayToken.isBlank()) return@withContext null
         val base = config.gatewayUrl.trim().trimEnd('/').substringBefore("/v1")
@@ -33,9 +42,15 @@ object SlurServer {
         runCatching {
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null
-                JSONObject(resp.body!!.string()).optDouble("score", Double.NaN).let {
-                    if (it.isNaN()) null else it.toFloat()
-                }
+                val o = JSONObject(resp.body!!.string())
+                if (!o.has("score")) return@use null
+                SlurResult(
+                    score = o.optDouble("score", 0.0).toFloat(),
+                    detected = o.optBoolean("detected", false),
+                    threshold = o.optDouble("threshold", 0.9447).toFloat(),
+                    mode = o.optString("mode", "corpus"),
+                    confidence = o.optString("confidence", "ok"),
+                )
             }
         }.getOrNull()
     }

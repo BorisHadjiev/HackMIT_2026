@@ -61,7 +61,12 @@ async def lifespan(app: FastAPI):
         app.state.agent = AgentClient(settings)
         app.state.speaker = SpeakerGate(settings)
         app.state.face = FaceServer(settings.face_model_path, settings.face_lr_path)
-        app.state.slur = SlurServer(settings.slur_model_path, settings.slur_profile_path)
+        app.state.slur = SlurServer(
+            settings.slur_model_path,
+            settings.slur_profile_path,
+            personal_threshold=settings.slur_personal_threshold,
+            ood_max=settings.slur_ood_max,
+        )
         app.state.asr = Asr(settings)
         log.info(
             "gateway ready: linq=%s deepgram=%s recipients=%d auth=%s db=%s",

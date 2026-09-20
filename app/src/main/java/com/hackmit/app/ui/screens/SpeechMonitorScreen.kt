@@ -35,6 +35,7 @@ import androidx.navigation.NavController
 import com.hackmit.app.audio.AudioCapture
 import com.hackmit.app.audio.RiskResult
 import com.hackmit.app.audio.RiskServer
+import com.hackmit.app.audio.SlurResult
 import com.hackmit.app.audio.SlurServer
 import com.hackmit.app.audio.Transcript
 import com.hackmit.app.audio.TranscribeServer
@@ -75,9 +76,8 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
     var enrolling by remember { mutableStateOf(false) }
     var enrollMessage by remember { mutableStateOf<String?>(null) }
     var aiTestBusy by remember { mutableStateOf(false) }
-    var aiTestScore by remember { mutableStateOf<Float?>(null) }
+    var aiTestResult by remember { mutableStateOf<SlurResult?>(null) }
     var aiTestMessage by remember { mutableStateOf<String?>(null) }
-    var aiTestMode by remember { mutableStateOf<String?>(null) }
     var aiTestTranscript by remember { mutableStateOf<Transcript?>(null) }
     var riskBusy by remember { mutableStateOf(false) }
     var riskResult by remember { mutableStateOf<RiskResult?>(null) }
@@ -130,12 +130,17 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                     InfoRow("Speech", if (state.speechActive) "Detected" else "Silence")
                     InfoRow("Deepgram", state.deepgramStatus)
                     state.aiScore?.let {
-                        InfoRow("AI slur score (WavLM)", "${(it * 100).toInt()}%")
+                        val verdict = when {
+                            state.aiConfidence == "low" -> "Low confidence"
+                            state.aiDetected == true -> "Slurred"
+                            else -> "Clear"
+                        }
+                        InfoRow("AI slur score (WavLM)", "${(it * 100).toInt()}%  ·  $verdict")
                     }
                     if (state.aiMode != null) {
                         InfoRow(
                             "AI mode",
-                            if (state.aiMode == "personal") "Personal (calibrated)" else "Corpus",
+                            if (state.aiMode == "personal") "Personal (calibrated)" else "Corpus (uncalibrated)",
                         )
                     }
                     InfoRow("Baseline", if (hasBaseline) "Ready" else "Not calibrated")
@@ -243,9 +248,8 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                         onClick = {
                             scope.launch {
                                 aiTestBusy = true
-                                aiTestScore = null
+                                aiTestResult = null
                                 aiTestMessage = null
-                                aiTestMode = null
                                 aiTestTranscript = null
                                 val pcm = ByteArrayOutputStream()
                                 val capture = AudioCapture { pcm.write(it) }
@@ -255,10 +259,9 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                                     delay(4000)
                                     capture.stop()
                                     val wav = Wav.wrapPcm16(pcm.toByteArray())
-                                    aiTestScore = SlurServer.analyze(vm.settingsStore, wav)
-                                    aiTestMode = SlurServer.mode(vm.settingsStore)
+                                    aiTestResult = SlurServer.analyze(vm.settingsStore, wav)
                                     aiTestTranscript = TranscribeServer.transcribe(vm.settingsStore, wav)
-                                    if (aiTestScore == null) aiTestMessage = "Could not reach the AI server."
+                                    if (aiTestResult == null) aiTestMessage = "Could not reach the AI server."
                                 }
                                 aiTestBusy = false
                             }
@@ -267,15 +270,20 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                     ) {
                         Text(if (aiTestBusy) "Recording\u2026 speak now" else "Record 4s + AI score")
                     }
-                    aiTestScore?.let { s ->
-                        InfoRow("AI score", "${(s * 100).toInt()}%")
+                    aiTestResult?.let { r ->
+                        InfoRow("AI score", "${(r.score * 100).toInt()}%")
+                        val verdict = when {
+                            r.confidence == "low" -> "Low confidence"
+                            r.detected -> "Slurred"
+                            else -> "Clear"
+                        }
                         InfoRow(
                             "Verdict",
-                            if (s >= 0.9447f) "Slurred" else "Clear",
-                            valueColor = if (s >= 0.9447f) severityColor(1f) else Color(0xFF2E7D32),
+                            verdict,
+                            valueColor = if (r.detected && r.confidence != "low") severityColor(1f) else Color(0xFF2E7D32),
                         )
-                        val modeText = aiTestMode ?: "corpus"
-                        InfoRow("Model", if (modeText == "personal") "Personal (your voice)" else "Population")
+                        InfoRow("Model", if (r.mode == "personal") "Personal (your voice)" else "Population")
+                        InfoRow("Threshold", "%.2f".format(r.threshold))
                     }
                     aiTestTranscript?.let { t ->
                         InfoRow("Transcript (${t.provider})", t.text.ifBlank { "—" })

@@ -13,9 +13,23 @@ import numpy as np
 log = logging.getLogger("strokesense.gateway.slur")
 
 MIN_SAMPLES = 8000  # 0.5 s @ 16 kHz
-WINDOW_SAMPLES = 16_000 * 4  # 4 s scoring window (matches the app's AI uploads)
+WINDOW_SAMPLES = 16_000 * 4  # 4 s scoring window (matches calibration)
+HOP_SAMPLES = 16_000 * 2
+MAX_WINDOWS = 4
 MIN_CALIB_WINDOWS = 2
 SSL_MODEL_ID = "microsoft/wavlm-base-plus"
+
+# Quality gate: silence / near-silence must never be scored as slur.
+RMS_MIN = 0.006
+MIN_SPEECH_FRACTION = 0.15
+
+# Personal-mode LR scores live on a different scale than the corpus (0.945).
+# TORGO same-speaker personal: healthy ~0.00, dysarthric ~1.0; real phone slur
+# often peaks ~0.45-0.8, so the corpus threshold misses it. Balanced default.
+DEFAULT_PERSONAL_THRESHOLD = 0.40
+# Corpus mode is only trusted when the embedding is in-distribution (enrolled users
+# use personal mode instead). Phone audio without calibration is OOD.
+DEFAULT_OOD_MAX = 1.2
 
 
 def wav_to_pcm(body: bytes) -> np.ndarray:
@@ -28,8 +42,6 @@ def wav_to_pcm(body: bytes) -> np.ndarray:
     if nch > 1:
         x = x.reshape(-1, nch).mean(axis=1)
     if sr != 16000:
-        import torch
-
         x = torchaudio_resample(x, sr)
     return x
 
@@ -42,21 +54,75 @@ def torchaudio_resample(x: np.ndarray, sr: int) -> np.ndarray:
     return TAF.resample(t, sr, 16000).numpy()
 
 
+def rms(x: np.ndarray) -> float:
+    if x.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))
+
+
+def _frame_rms(x: np.ndarray, sr: int = 16000, frame_ms: int = 30) -> np.ndarray:
+    frame = int(sr * frame_ms / 1000)
+    if x.size < frame:
+        return np.array([rms(x)], dtype=np.float64)
+    n = x.size // frame
+    return np.sqrt(np.mean(x[: n * frame].reshape(n, frame).astype(np.float64) ** 2, axis=1))
+
+
+def speech_fraction(x: np.ndarray, sr: int = 16000) -> float:
+    if x.size == 0:
+        return 0.0
+    fr = _frame_rms(x, sr)
+    if fr.size == 0:
+        return 0.0
+    thr = max(RMS_MIN, 0.4 * float(np.median(fr)))
+    return float(np.mean(fr > thr))
+
+
+def select_windows(x: np.ndarray) -> list[np.ndarray]:
+    """Highest-energy 4 s speech windows (peak-pooled later). Never zero-pad."""
+    if x.size < MIN_SAMPLES:
+        return []
+    if rms(x) < RMS_MIN:
+        return []
+    if x.size <= WINDOW_SAMPLES:
+        return [x]
+
+    cands: list[tuple[float, np.ndarray]] = []
+    start = 0
+    while start < x.size:
+        end = min(start + WINDOW_SAMPLES, x.size)
+        if end - start >= MIN_SAMPLES:
+            w = x[start:end]
+            lvl = rms(w)
+            if lvl >= RMS_MIN:
+                cands.append((lvl, w))
+        if end >= x.size:
+            break
+        start += HOP_SAMPLES
+    cands.sort(key=lambda t: t[0], reverse=True)
+    wins = [w for _, w in cands[:MAX_WINDOWS]]
+    return wins or [x]
+
+
 class SlurServer:
-    """Server-side slur classifier: WavLM embeddings + SSL LR.
+    """Server-side slur classifier: WavLM embeddings + SSL LR (WavLM-only).
 
     Two operating modes:
-      - corpus  : the trained SSL-only LR on raw WavLM embeddings (cross-sectional).
-      - personal: domain-shifted scoring for the enrolled user. Live speech is
-                  standardized, shifted onto the corpus healthy centroid
-                  (z' = z - user_centroid + healthy_centroid), then scored with the
-                  same LR. This anchors the user's phone-mic domain to the healthy
-                  region (killing the OOD false-positive mode) while preserving the
-                  LR's content-robust discrimination.
-    Personal mode is used whenever a valid profile exists.
+      - corpus  : cross-sectional LR on raw WavLM embeddings; only trusted when the
+                  embedding is in-distribution (guarded by an OOD check).
+      - personal: domain-shifted scoring for the enrolled user
+                  (z' = z - user_centroid + healthy_centroid), with a personal
+                  decision threshold. This is the trusted path.
+    Windows are VAD-selected, peak-pooled, never averaged.
     """
 
-    def __init__(self, model_json: str, profile_path: str = "") -> None:
+    def __init__(
+        self,
+        model_json: str,
+        profile_path: str = "",
+        personal_threshold: float | None = None,
+        ood_max: float | None = None,
+    ) -> None:
         self._params = json.load(open(model_json))
         self._profile_path = profile_path
         self._lock = threading.Lock()
@@ -69,6 +135,14 @@ class SlurServer:
         h = self._params.get("healthy_centroid_z")
         self._healthy_centroid = np.asarray(h, dtype=np.float32) if h else None
         self._temperature = float(self._params.get("temperature", 1.0))
+        self._personal_threshold = float(
+            personal_threshold
+            if personal_threshold is not None
+            else self._params.get("personal_threshold", DEFAULT_PERSONAL_THRESHOLD)
+        )
+        self._ood_max = float(
+            ood_max if ood_max is not None else self._params.get("ood_max", DEFAULT_OOD_MAX)
+        )
         self._load_profile()
 
     def _load_profile(self) -> None:
@@ -121,9 +195,10 @@ class SlurServer:
             if __import__("torch").cuda.is_available():
                 self._model = self._model.cuda()
             log.info(
-                "slur server ready (model=%s, threshold=%.4f, enrolled=%s)",
+                "slur server ready (model=%s, threshold=%.4f, personal_thr=%.4f, enrolled=%s)",
                 SSL_MODEL_ID,
                 self._params["threshold"],
+                self._personal_threshold,
                 self._centroid is not None,
             )
 
@@ -150,34 +225,48 @@ class SlurServer:
         logit = logit / temperature
         return 1.0 / (1.0 + np.exp(-logit)), ood
 
+    def _empty(self, reason: str, extra: dict | None = None) -> dict:
+        out = {
+            "score": 0.0,
+            "score_corpus": 0.0,
+            "score_personal": 0.0,
+            "score_cal": 0.0,
+            "mode": "personal" if self._centroid is not None else "corpus",
+            "enrolled": self._centroid is not None,
+            "ood": 0.0,
+            "temperature": round(self._temperature, 3),
+            "threshold": float(self._params["threshold"]),
+            "detected": False,
+            "confidence": "low",
+            "reason": reason,
+            "speech_rms": 0.0,
+            "speech_fraction": 0.0,
+            "windows": 0,
+        }
+        if extra:
+            out.update(extra)
+        return out
+
     def enroll(self, body: bytes) -> dict:
         with self._lock:
             self._ensure()
             x = wav_to_pcm(body)
-            if x.size < MIN_SAMPLES:
-                return {"status": "error", "error": "too short for calibration"}
-            n = x.size // WINDOW_SAMPLES
-            if n < MIN_CALIB_WINDOWS:
+            wins = select_windows(x)
+            if len(wins) < MIN_CALIB_WINDOWS:
                 return {
                     "status": "error",
-                    "error": f"need >= {MIN_CALIB_WINDOWS * 4}s of speech for calibration",
+                    "error": f"need >= {MIN_CALIB_WINDOWS * 4}s of audible speech for calibration",
                 }
-            embs = np.stack(
-                [
-                    self._standardize(
-                        self._embed(x[i * WINDOW_SAMPLES : (i + 1) * WINDOW_SAMPLES])
-                    )
-                    for i in range(n)
-                ]
-            )
-            self._centroid = embs.mean(axis=0).astype(np.float32)
-            self._windows = n
+            embs = np.stack([self._standardize(self._embed(w)) for w in wins[:8]])
+            # Median-of-windows is robust to one odd (e.g. noisy) window.
+            self._centroid = np.median(embs, axis=0).astype(np.float32)
+            self._windows = int(embs.shape[0])
             self._enrolled_at = int(time.time() * 1000)
             self._save_profile()
-            log.info("slur enrolled windows=%d", n)
+            log.info("slur enrolled windows=%d", self._windows)
             return {
                 "status": "enrolled",
-                "windows": n,
+                "windows": self._windows,
                 "dims": int(self._centroid.size),
                 "mode": "personal",
             }
@@ -200,6 +289,8 @@ class SlurServer:
                 "windows": self._windows,
                 "mode": "personal" if self._centroid is not None else "corpus",
                 "threshold": float(self._params["threshold"]),
+                "personal_threshold": self._personal_threshold,
+                "ood_max": self._ood_max,
             }
 
     def analyze(self, body: bytes) -> dict:
@@ -208,41 +299,70 @@ class SlurServer:
             self._refresh_profile()
             x = wav_to_pcm(body)
             if x.size == 0:
-                return {"detected": False, "error": "bad wav"}
-            # Score the first 4 s window so analysis matches calibration embeddings.
-            x = x[:WINDOW_SAMPLES] if x.size >= WINDOW_SAMPLES else np.pad(x, (0, WINDOW_SAMPLES - x.size))
-            rms = float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))
-            log.info(
-                "slur analyze raw: bytes=%d dur=%.2fs rms=%.4f",
-                len(body),
-                x.size / 16000,
-                rms,
-            )
-            v = self._embed(x)
-            z = self._standardize(v)
-            score_corpus, ood = self._corpus_score(z)
+                return self._empty("bad wav")
+            level = rms(x)
+            frac = speech_fraction(x)
+            if level < RMS_MIN or frac < MIN_SPEECH_FRACTION:
+                log.info("slur analyze gated: rms=%.4f frac=%.2f", level, frac)
+                return self._empty(
+                    "no_speech",
+                    extra={"speech_rms": round(level, 4), "speech_fraction": round(frac, 3)},
+                )
+            wins = select_windows(x)
+            if not wins:
+                return self._empty("no_speech")
 
             enrolled = self._centroid is not None and self._healthy_centroid is not None
-            score_personal = score_corpus
-            if enrolled:
-                zp = z - self._centroid + self._healthy_centroid
-                score_personal, _ = self._corpus_score(zp)
+            score_corpus = 0.0
+            score_personal = 0.0
+            oods: list[float] = []
+            best_cal = 0.0
+            for w in wins:
+                z = self._standardize(self._embed(w))
+                sc, ood = self._corpus_score(z)
+                oods.append(ood)
+                score_corpus = max(score_corpus, sc)
+                if enrolled:
+                    zp = z - self._centroid + self._healthy_centroid
+                    sp, _ = self._corpus_score(zp)
+                    score_personal = max(score_personal, sp)
+                    if sp >= score_personal:
+                        cal, _ = self._corpus_score(zp, self._temperature)
+                        best_cal = max(best_cal, cal)
+            ood = float(np.mean(oods)) if oods else 0.0
 
-            score = score_personal if enrolled else score_corpus
-            # Calibrated probability (temperature scaling) for downstream fusion.
             if enrolled:
-                score_cal, _ = self._corpus_score(zp, self._temperature)
+                score = score_personal
+                thr = self._personal_threshold
+                score_cal = best_cal
+                detected = bool(score >= thr)
+                confidence = "ok"
             else:
-                score_cal, _ = self._corpus_score(z, self._temperature)
-            thr = float(self._params["threshold"])
+                score = score_corpus
+                thr = float(self._params["threshold"])
+                score_cal = max(best_cal, score)
+                if ood > self._ood_max:
+                    # Uncalibrated + out-of-distribution: do not assert slur.
+                    detected = False
+                    confidence = "low"
+                else:
+                    detected = bool(score >= thr)
+                    confidence = "ok"
+
             log.info(
-                "slur analyze: mode=%s score=%.3f corpus=%.3f ood=%.2f threshold=%.3f detected=%s",
+                "slur analyze: mode=%s score=%.3f corpus=%.3f personal=%.3f ood=%.2f "
+                "thr=%.3f rms=%.4f frac=%.2f wins=%d detected=%s conf=%s",
                 "personal" if enrolled else "corpus",
                 score,
                 score_corpus,
+                score_personal,
                 ood,
                 thr,
-                score >= thr,
+                level,
+                frac,
+                len(wins),
+                detected,
+                confidence,
             )
             return {
                 "score": round(score, 4),
@@ -254,5 +374,10 @@ class SlurServer:
                 "ood": round(ood, 3),
                 "temperature": round(self._temperature, 3),
                 "threshold": thr,
-                "detected": bool(score >= thr),
+                "detected": detected,
+                "confidence": confidence,
+                "reason": "ok",
+                "speech_rms": round(level, 4),
+                "speech_fraction": round(frac, 3),
+                "windows": len(wins),
             }

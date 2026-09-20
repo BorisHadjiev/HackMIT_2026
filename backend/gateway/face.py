@@ -86,6 +86,7 @@ class FaceServer:
             z = (np.array([f[k] for k in KEYS]) - self._mean) / self._std
             logit = float(np.dot(self._coef, z)) + self._intercept
             score = 1.0 / (1.0 + np.exp(-logit))
+            log.info("face analyze: detected=True score=%.3f mouth=%.4f eye=%.4f", score, f["mouth_perp_abs"], f["eye_open_asym"])
             return {
                 "detected": True,
                 "score": round(score, 4),

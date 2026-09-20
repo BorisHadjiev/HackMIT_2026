@@ -1,13 +1,5 @@
 package com.hackmit.app.video
 
-import android.content.Context
-import android.os.SystemClock
-import androidx.camera.core.ImageProxy
-import com.google.mediapipe.framework.image.BitmapImageBuilder
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.vision.core.RunningMode
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
-import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot
@@ -48,62 +40,6 @@ class MockFaceAnalyzer(private val abnormal: Boolean = false) : FaceAnalyzer {
                 eyeAsymmetry = (0.05 + 0.03 * sin(t * 0.9)).toFloat(),
             )
         }
-    }
-}
-
-/**
- * Real analyzer: CameraX ImageAnalysis frames -> MediaPipe FaceLandmarker
- * (LIVE_STREAM) -> 468 normalized landmarks -> [AsymmetryCalculator].
- */
-class MediaPipeFaceAnalyzer(context: Context, private val minConfidence: Float = 0.5f) : FaceAnalyzer {
-
-    @Volatile
-    private var latest = FaceFrame(false, 0f, 0f, 0f)
-
-    @Volatile
-    private var processing = false
-
-    private val landmarker: FaceLandmarker = FaceLandmarker.createFromOptions(
-        context,
-        FaceLandmarker.FaceLandmarkerOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setModelAssetPath("face_landmarker.task").build())
-            .setRunningMode(RunningMode.LIVE_STREAM)
-            .setNumFaces(1)
-            .setMinFaceDetectionConfidence(minConfidence)
-            .setResultListener { result, _ -> latest = toFrame(result) }
-            .setErrorListener { _ -> }
-            .build(),
-    )
-
-    override fun current(): FaceFrame = latest
-
-    fun analyze(imageProxy: ImageProxy) {
-        if (processing) {
-            imageProxy.close()
-            return
-        }
-        processing = true
-        val bitmap = imageProxy.toBitmap()
-        val mpImage = BitmapImageBuilder(bitmap).build()
-        landmarker.detectAsync(mpImage, SystemClock.uptimeMillis())
-        imageProxy.close()
-    }
-
-    fun close() {
-        landmarker.close()
-    }
-
-    private fun toFrame(result: FaceLandmarkerResult): FaceFrame {
-        val faces = result.faceLandmarks()
-        if (faces.isEmpty()) return FaceFrame(false, 0f, 0f, 0f)
-        val landmarks = faces[0]
-        val arr = FloatArray(landmarks.size * 2)
-        for (i in landmarks.indices) {
-            arr[i * 2] = landmarks[i].x()
-            arr[i * 2 + 1] = landmarks[i].y()
-        }
-        val feats = AsymmetryCalculator.features(arr)
-        return FaceFrame(true, AsymmetryCalculator.logisticScore(arr), feats.mouthDroop, feats.eyeAsymmetry)
     }
 }
 

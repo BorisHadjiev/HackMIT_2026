@@ -123,7 +123,6 @@ dependencies {
 
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.okhttp)
-    implementation(libs.mediapipe.tasks.vision)
 
     testImplementation(libs.junit)
 

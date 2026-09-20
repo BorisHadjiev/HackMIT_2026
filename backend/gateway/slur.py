@@ -68,6 +68,7 @@ class SlurServer:
         self._profile_mtime = None
         h = self._params.get("healthy_centroid_z")
         self._healthy_centroid = np.asarray(h, dtype=np.float32) if h else None
+        self._temperature = float(self._params.get("temperature", 1.0))
         self._load_profile()
 
     def _load_profile(self) -> None:
@@ -142,10 +143,11 @@ class SlurServer:
         p = self._params
         return (v - np.asarray(p["mean"], dtype=np.float32)) / np.asarray(p["std"], dtype=np.float32)
 
-    def _corpus_score(self, z: np.ndarray) -> tuple[float, float]:
+    def _corpus_score(self, z: np.ndarray, temperature: float = 1.0) -> tuple[float, float]:
         p = self._params
         ood = float(np.mean(np.abs(z)))
         logit = float(np.dot(np.asarray(p["coef"], dtype=np.float32), z)) + p["intercept"]
+        logit = logit / temperature
         return 1.0 / (1.0 + np.exp(-logit)), ood
 
     def enroll(self, body: bytes) -> dict:
@@ -227,6 +229,11 @@ class SlurServer:
                 score_personal, _ = self._corpus_score(zp)
 
             score = score_personal if enrolled else score_corpus
+            # Calibrated probability (temperature scaling) for downstream fusion.
+            if enrolled:
+                score_cal, _ = self._corpus_score(zp, self._temperature)
+            else:
+                score_cal, _ = self._corpus_score(z, self._temperature)
             thr = float(self._params["threshold"])
             log.info(
                 "slur analyze: mode=%s score=%.3f corpus=%.3f ood=%.2f threshold=%.3f detected=%s",
@@ -241,9 +248,11 @@ class SlurServer:
                 "score": round(score, 4),
                 "score_corpus": round(score_corpus, 4),
                 "score_personal": round(score_personal, 4),
+                "score_cal": round(score_cal, 4),
                 "mode": "personal" if enrolled else "corpus",
                 "enrolled": enrolled,
                 "ood": round(ood, 3),
+                "temperature": round(self._temperature, 3),
                 "threshold": thr,
                 "detected": bool(score >= thr),
             }

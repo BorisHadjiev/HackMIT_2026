@@ -84,6 +84,27 @@ Validated on TORGO (same speaker, FC01):
 Gateways expose this as `POST /v1/slur/calibrate` (switches `analyze` to
 `"mode": "personal"`).
 
+## Probability calibration
+
+`calibrate.py` recomputes the speaker-disjoint pooled SSL-LR predictions and
+reports ECE / Brier / reliability diagrams, plus a temperature `T` fit to
+minimize log-loss:
+
+| Corpus | ECE (raw) | ECE (T-scaled) | Brier (raw) | Temperature |
+| --- | --- | --- | --- | --- |
+| TORGO | 0.008 | 0.005 | — | 1.15 |
+| pathological | 0.113 | 0.103 | — | 2.83 |
+
+- `T` is baked into the served model JSON (`temperature`). The gateway keeps the
+  decision score raw (threshold 0.9447 unchanged) and additionally reports
+  `score_cal` — the temperature-scaled probability — for downstream risk fusion.
+- Plots: `out/{torgo,pathological}_reliability.png`, report in
+  `out/calibration_report.md`.
+
+```bash
+.venv/bin/python calibrate.py
+```
+
 ## Re-run
 ```bash
 .venv/bin/python download_data.py   # one-time download (public)

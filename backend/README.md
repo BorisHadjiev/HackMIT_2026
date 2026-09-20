@@ -34,6 +34,9 @@ never sees the Linq token. It only knows the gateway URL and a shared
 | `POST` | `/v1/speaker/enroll` | Enroll the user's voice for gating (raw PCM/WAV) |
 | `POST` | `/v1/face/analyze` | Server-side face asymmetry (MediaPipe + LR) |
 | `POST` | `/v1/slur/analyze` | Server-side slur score (WavLM embedding + LR) |
+| `POST` | `/v1/slur/calibrate` | Enroll the user's voice (≥8 s) → personal scoring mode |
+| `GET` | `/v1/slur/status` | Current slur mode (`personal`/`corpus`) + enrollment state |
+| `POST` | `/v1/slur/clear` | Forget the slur voice profile |
 | `GET` | `/v1/speaker/status` | Gating status + enrollment state |
 
 ### Voice (TTS + agent)
@@ -79,6 +82,22 @@ The APK streams audio to `WS /v1/deepgram/stream?...<deepgram query params>` wit
 `Authorization: Token <gateway_token>`. The gateway validates the token, connects
 to Deepgram with its own `DEEPGRAM_API_KEY`, and relays frames/events both ways.
 The client's query parameters (model, encoding, etc.) are forwarded to Deepgram.
+
+### Slur analysis (WavLM)
+
+`POST /v1/slur/analyze` scores a WAV/PCM clip with a WavLM embedding + SSL-only LR
+(`SLUR_MODEL_PATH`, threshold 0.945). By default it runs in **corpus** mode.
+
+`POST /v1/slur/calibrate` enrolls the user's voice (≥8 s of speech) and switches to
+**personal** mode: live embeddings are shifted onto the corpus healthy centroid
+(`z' = z - user_centroid + healthy_centroid`) before the same LR. This anchors
+phone-mic audio to the healthy region — fixing the OOD false-positive that made
+normal phone speech score ~1.0 in corpus mode — while real slur still spikes.
+Profile persists at `SLUR_PROFILE_PATH` and is mtime-reloaded, so it works across
+uvicorn workers.
+
+Validated on TORGO: same-speaker healthy (incl. different content) ≈ 0.00,
+dysarthric 1.00, synthesized acute slur 0.9996.
 
 ## Configuration
 

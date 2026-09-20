@@ -60,6 +60,30 @@ and triggering an alert on the exact algorithm the phone runs.
 (time-stretch + pitch restore + low-pass), used for the in-app demo and as an
 acute-slurring supplement.
 
+## Personal-mode calibration (fixes phone-mic over-reporting)
+
+The SSL LR (AUC 0.945) is trained on corpus audio. Live phone-mic speech is
+out-of-domain: its embedding sits far from the corpus, so the LR saturates at
+~1.0 for *normal* phone speech.
+
+Fix: enroll the user's voice (≥8 s) and shift live embeddings onto the corpus
+**healthy centroid** before the same LR — `z' = z - user_centroid + healthy_centroid`
+(`healthy_centroid_z` is baked into the exported model JSONs). This is a
+cepstral-mean-style domain anchor: the user's phone domain maps onto healthy,
+and real slur deviates from it.
+
+Validated on TORGO (same speaker, FC01):
+
+| clip | corpus | personal |
+| --- | --- | --- |
+| enrolled healthy | 0.0002 | 0.000 |
+| healthy, different content | 0.001 | 0.000 |
+| dysarthric | 1.000 | 1.000 |
+| synthesized acute slur | 1.000 | 0.9996 |
+
+Gateways expose this as `POST /v1/slur/calibrate` (switches `analyze` to
+`"mode": "personal"`).
+
 ## Re-run
 ```bash
 .venv/bin/python download_data.py   # one-time download (public)

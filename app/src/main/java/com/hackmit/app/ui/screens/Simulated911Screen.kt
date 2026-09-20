@@ -194,7 +194,7 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
             if (lines.isNotEmpty()) {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
+                        Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text("Transcript", style = MaterialTheme.typography.titleMedium)

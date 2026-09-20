@@ -117,7 +117,7 @@ class SlurDetector(
             .map { (key, z) -> "${FeatureVector.LABELS[key] ?: key} shifted (z=${"%.1f".format(z)})" }
             .ifEmpty { listOf("Speech pattern within baseline") }
 
-        return SlurAssessment(score = ewma, level = level, reasons = reasons, timestampMs = now)
+        return SlurAssessment(score = ewma, level = level, reasons = reasons, timestampMs = now, raw = raw)
     }
 
     private fun minStdFor(key: String): Float = when (key) {

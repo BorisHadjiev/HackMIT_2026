@@ -35,7 +35,10 @@ def _zcr(x: np.ndarray) -> float:
 
 
 def _pitch(x: np.ndarray, sr: int):
-    """Port of Dsp.pitch: autocorrelation over 60-500 Hz, first strong local max."""
+    """Port of Dsp.pitch (autocorrelation 60-500 Hz, first strong local max).
+
+    Uses FFT autocorrelation for speed; the selection logic matches the app.
+    """
     n = x.size
     if n < sr // 25:
         return 0.0, 0.0, False
@@ -47,8 +50,11 @@ def _pitch(x: np.ndarray, sr: int):
     max_lag = min(int(sr / 60.0), n - 2)
     if max_lag <= min_lag + 1:
         return 0.0, 0.0, False
+    # FFT autocorrelation (raw sums), then normalize by n-lag.
+    xf = np.fft.rfft(x, n=n * 2)
+    ac = np.fft.irfft(xf * np.conj(xf))[:n]
     lags = np.arange(min_lag, max_lag + 1)
-    r = np.array([np.dot(x[: n - l], x[l:]) / (n - l) for l in lags])
+    r = ac[lags] / (n - lags)
     power = r0 / n
     target = 0.5 * power
     chosen = -1
@@ -159,18 +165,52 @@ def extract_windows(y: np.ndarray, sr: int, wpm: float = 0.0,
     out: list[dict[str, float]] = []
     for start in range(0, y.size - window_len + 1, hop_len):
         win = y[start:start + window_len]
-        f0, hnr, voiced = _pitch(win, sr)
-        jitter, shimmer = _jitter_shimmer(win, sr, f0) if voiced else (0.0, 0.0)
+
+        # Voiced-gated 40 ms sub-frames (matches AcousticFeatureExtractor.compute).
+        frame = sr * 40 // 1000
+        f0s, hnrs, voiced = [], [], []
+        s0 = 0
+        while s0 + frame <= win.size:
+            f0, h, v = _pitch(win[s0:s0 + frame], sr)
+            if v:
+                f0s.append(f0)
+                hnrs.append(h)
+                voiced.append(win[s0:s0 + frame])
+            s0 += frame // 2
+
+        rms = _rms(win)
+        zcr = _zcr(win)
+        ems4hz = _envelope_modulation_4hz(win, sr)
+        if len(f0s) < 2:
+            out.append({
+                "f0Mean": 0.0, "f0Std": 0.0, "jitter": 0.0, "shimmer": 0.0, "hnr": 0.0,
+                "rms": rms, "zcr": zcr, "centroid": 0.0, "ems4hz": ems4hz,
+                "wpm": wpm, "confidence": confidence, "pauseRatio": _pause_ratio(win), "fillerRatio": 0.0,
+            })
+            continue
+
+        f0_mean = float(np.mean(f0s))
+        f0_std = float(np.std(f0s))
+        hnr = float(np.mean(hnrs))
+        jitters, shimmers = [], []
+        for sub, f0 in zip(voiced, f0s):
+            j, s = _jitter_shimmer(sub, sr, f0)
+            if j > 0 and s > 0:
+                jitters.append(j)
+                shimmers.append(s)
+        jitter = float(np.mean(jitters)) if jitters else 0.0
+        shimmer = float(np.mean(shimmers)) if shimmers else 0.0
+
         out.append({
-            "f0Mean": float(f0),
-            "f0Std": _f0_std(win, sr),
+            "f0Mean": f0_mean,
+            "f0Std": f0_std,
             "jitter": jitter,
             "shimmer": shimmer,
-            "hnr": hnr if voiced else 0.0,
-            "rms": _rms(win),
-            "zcr": _zcr(win),
+            "hnr": hnr,
+            "rms": rms,
+            "zcr": zcr,
             "centroid": 0.0,
-            "ems4hz": _envelope_modulation_4hz(win, sr),
+            "ems4hz": ems4hz,
             "wpm": wpm,
             "confidence": confidence,
             "pauseRatio": _pause_ratio(win),

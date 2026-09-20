@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 data class DemoWindow(
     val features: FeatureVector,
     val score: Float,
+    val raw: Float,
     val level: AlertLevel,
     val reasons: List<String>,
 )
@@ -49,9 +50,11 @@ object DemoSpeech {
         (b[off].toInt() and 0xFF) or ((b[off + 1].toInt() and 0xFF) shl 8) or
             ((b[off + 2].toInt() and 0xFF) shl 16) or ((b[off + 3].toInt() and 0xFF) shl 24)
 
-    /** 2 s non-overlapping windows of features (mirrors the monitor's windowing). */
-    fun windows(samples: FloatArray, sampleRate: Int = 16_000): List<FeatureVector> {
+    /** 2 s windows of features with 1 s overlap (mirrors the monitor's 2 s windows,
+     *  but hops faster so short demo clips still yield enough baseline samples). */
+    fun windows(samples: FloatArray, sampleRate: Int = 16_000, hopSeconds: Float = 1f): List<FeatureVector> {
         val winLen = sampleRate * 2
+        val hopLen = (sampleRate * hopSeconds).toInt()
         val out = mutableListOf<FeatureVector>()
         var start = 0
         while (start + winLen <= samples.size) {
@@ -59,7 +62,7 @@ object DemoSpeech {
             val shorts = ShortArray(winLen) { (samples[start + it] * 32767).toInt().toShort() }
             extractor.add(shorts)
             out.add(extractor.compute())
-            start += winLen
+            start += hopLen
         }
         return out
     }
@@ -70,12 +73,12 @@ object DemoSpeech {
     fun score(
         windows: List<FeatureVector>,
         baseline: BaselineProfile?,
-        sensitivity: Float = 0.55f,
+        sensitivity: Float = 0.75f,
     ): List<DemoWindow> {
         val detector = SlurDetector(baseline, sensitivity)
         return windows.map { fv ->
             val assessment = detector.update(fv)
-            DemoWindow(fv, assessment.score, assessment.level, assessment.reasons)
+            DemoWindow(fv, assessment.score, assessment.raw, assessment.level, assessment.reasons)
         }
     }
 }

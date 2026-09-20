@@ -83,6 +83,7 @@ data class SlurAssessment(
     val level: AlertLevel,
     val reasons: List<String>,
     val timestampMs: Long = System.currentTimeMillis(),
+    val raw: Float = 0f,
 )
 
 data class MonitorState(

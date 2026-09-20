@@ -32,6 +32,13 @@ class FaceAnalysisController(
     @Volatile
     private var lastUpload = 0L
 
+    /** Warms the connection so the UI flips to "connected" before the first frame. */
+    fun warmUp() {
+        scope.launch {
+            if (FaceServer.ping(settings)) serverOk = true
+        }
+    }
+
     fun handle(proxy: ImageProxy) {
         val now = SystemClock.uptimeMillis()
         if (inFlight || now - lastUpload < minIntervalMs) {

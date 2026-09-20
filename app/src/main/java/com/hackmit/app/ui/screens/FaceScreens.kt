@@ -93,6 +93,7 @@ fun FaceCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
     val samples = remember { mutableListOf<Float>() }
 
     LaunchedEffect(Unit) {
+        controller.warmUp()
         while (true) {
             if (frame.detected) {
                 samples.add(frame.asymmetry)
@@ -172,6 +173,7 @@ fun FaceTestScreen(vm: AssessmentViewModel, nav: NavController) {
     var peak by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
+        controller.warmUp()
         while (true) {
             val f = controller.frame.value
             if (f.detected) peak = maxOf(peak, f.asymmetry)

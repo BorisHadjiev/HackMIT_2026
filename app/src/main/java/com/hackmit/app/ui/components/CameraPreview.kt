@@ -1,5 +1,6 @@
 package com.hackmit.app.ui.components
 
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -8,15 +9,19 @@ import androidx.camera.core.UseCase
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
- * Live camera preview used by the face calibration/test screens. When [onFrame]
- * is provided, an ImageAnalysis use case feeds every frame to it (e.g. the
- * MediaPipe face analyzer).
+ * Live camera preview used by the face screens. When [onFrame] is provided, an
+ * ImageAnalysis use case feeds low-res frames (640x480) to it on a background
+ * thread so the server-side face analysis starts promptly.
  */
 @Composable
 fun CameraPreview(
@@ -26,6 +31,8 @@ fun CameraPreview(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val analysisExecutor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) { onDispose { analysisExecutor.shutdown() } }
 
     androidx.compose.ui.viewinterop.AndroidView(
         modifier = modifier,
@@ -43,8 +50,9 @@ fun CameraPreview(
                         if (onFrame != null) {
                             val analysis = ImageAnalysis.Builder()
                                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                .setTargetResolution(Size(640, 480))
                                 .build()
-                            analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { proxy ->
+                            analysis.setAnalyzer(analysisExecutor) { proxy ->
                                 onFrame(proxy)
                             }
                             useCases += analysis

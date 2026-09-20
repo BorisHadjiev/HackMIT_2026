@@ -21,8 +21,21 @@ object FaceServer {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
+    /** Lightweight authenticated ping to warm the connection and validate the token. */
+    suspend fun ping(settings: SettingsStore): Boolean = withContext(Dispatchers.IO) {
+        val config = settings.alertConfig.first()
+        if (config.gatewayUrl.isBlank() || config.gatewayToken.isBlank()) return@withContext false
+        val base = config.gatewayUrl.trim().trimEnd('/').substringBefore("/v1")
+        val request = Request.Builder()
+            .url("$base/v1/speaker/status")
+            .header("X-Alert-Gateway-Token", config.gatewayToken)
+            .get()
+            .build()
+        runCatching { client.newCall(request).execute().use { it.isSuccessful } }.getOrDefault(false)
+    }
+
     /** Downscales a camera bitmap to [maxDim] and encodes it as JPEG. */
-    fun jpeg(bitmap: Bitmap, maxDim: Int = 640, quality: Int = 70): ByteArray? {
+    fun jpeg(bitmap: Bitmap, maxDim: Int = 480, quality: Int = 60): ByteArray? {
         val scaled = if (maxOf(bitmap.width, bitmap.height) > maxDim) {
             val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
             Bitmap.createScaledBitmap(

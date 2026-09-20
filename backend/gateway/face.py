@@ -68,7 +68,20 @@ class FaceServer:
         self._coef = np.array(params["coef"], dtype=np.float32)
         self._intercept = float(params["intercept"])
         self._threshold = float(params.get("threshold", 0.5535))
-        log.info("face server ready (model=%s, lr threshold=%.4f)", model_path, self._threshold)
+        self._temperature = float(params.get("temperature", 1.0))
+        log.info(
+            "face server ready (model=%s, lr threshold=%.4f, temperature=%.3f)",
+            model_path,
+            self._threshold,
+            self._temperature,
+        )
+
+    @staticmethod
+    def _quality(lm: np.ndarray) -> float:
+        """Rough input quality: larger/frontal faces score higher."""
+        xs = lm[:, 0]
+        width = float(xs.max() - xs.min())
+        return float(max(0.0, min(1.0, width / 0.25)))  # face spanning >=25% of frame = good
 
     def analyze(self, jpeg: bytes) -> dict:
         with self._lock:
@@ -86,10 +99,21 @@ class FaceServer:
             z = (np.array([f[k] for k in KEYS]) - self._mean) / self._std
             logit = float(np.dot(self._coef, z)) + self._intercept
             score = 1.0 / (1.0 + np.exp(-logit))
-            log.info("face analyze: detected=True score=%.3f mouth=%.4f eye=%.4f", score, f["mouth_perp_abs"], f["eye_open_asym"])
+            score_cal = 1.0 / (1.0 + np.exp(-logit / self._temperature))
+            quality = self._quality(lm)
+            log.info(
+                "face analyze: detected=True score=%.3f cal=%.3f q=%.2f mouth=%.4f eye=%.4f",
+                score,
+                score_cal,
+                quality,
+                f["mouth_perp_abs"],
+                f["eye_open_asym"],
+            )
             return {
                 "detected": True,
                 "score": round(score, 4),
+                "score_cal": round(score_cal, 4),
+                "quality": round(quality, 3),
                 "mouth": round(f["mouth_perp_abs"], 5),
                 "eye": round(f["eye_open_asym"], 5),
                 "threshold": self._threshold,

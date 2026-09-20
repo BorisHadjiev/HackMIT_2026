@@ -13,8 +13,9 @@ import json
 from pathlib import Path
 
 import numpy as np
+from scipy.optimize import minimize
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import brier_score_loss, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -22,6 +23,24 @@ from sklearn.preprocessing import StandardScaler
 KEYS = ["mouth_perp_abs", "eye_open_asym", "cheek_perp_abs", "brow_perp_abs"]
 TRAIN_SETS = ["stroke", "palsynet", "tiny"]
 CONTROL = "lfw"
+
+
+def ece(y, p, n_bins=10):
+    total, bins = 0.0, np.linspace(0, 1, n_bins + 1)
+    for lo, hi in zip(bins[:-1], bins[1:]):
+        m = (p >= lo) & (p < hi) | ((p == 1.0) & (hi == 1.0))
+        if not m.any():
+            continue
+        total += m.sum() * abs(y[m].mean() - p[m].mean())
+    return float(total / len(y))
+
+
+def fit_temperature(logits, y):
+    def nll(T):
+        p = np.clip(1.0 / (1.0 + np.exp(-logits / T)), 1e-7, 1 - 1e-7)
+        return float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean())
+
+    return float(minimize(nll, x0=1.0, method="Nelder-Mead").x[0])
 
 
 def load(cache: Path, name: str):
@@ -48,7 +67,11 @@ def main() -> None:
     clf = make_pipeline(StandardScaler(), LogisticRegression(max_iter=5000, class_weight="balanced"))
     cv = StratifiedKFold(5, shuffle=True, random_state=0)
     p_cv = cross_val_predict(clf, X, y, cv=cv, method="predict_proba")[:, 1]
+    l_cv = cross_val_predict(clf, X, y, cv=cv, method="decision_function")
     print(f"5-fold CV AUC = {roc_auc_score(y, p_cv):.4f}")
+    T = fit_temperature(l_cv, y)
+    p_cal = 1.0 / (1.0 + np.exp(-l_cv / T))
+    print(f"temperature T={T:.3f}  ECE raw={ece(y, p_cv):.4f} -> cal={ece(y, p_cal):.4f}  Brier raw={brier_score_loss(y, p_cv):.4f}")
 
     clf.fit(X, y)
     scaler = clf.named_steps["standardscaler"]
@@ -80,7 +103,10 @@ def main() -> None:
         "coef": coef,
         "intercept": intercept,
         "threshold": thr,
+        "temperature": T,
         "cv_auc": float(roc_auc_score(y, p_cv)),
+        "ece": ece(y, p_cv),
+        "brier": brier_score_loss(y, p_cv),
         "lfw_fp": lfw_fp,
         "train_sens": sens_train,
         "train_spec": spec_train,

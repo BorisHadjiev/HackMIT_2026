@@ -20,6 +20,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.hackmit.app.audio.Agent
+import com.hackmit.app.audio.Tts
 import com.hackmit.app.domain.ModuleType
 import com.hackmit.app.domain.RiskBand
 import com.hackmit.app.alert.AlertConfig
@@ -38,6 +41,7 @@ import com.hackmit.app.ui.components.InfoRow
 import com.hackmit.app.ui.components.ScoreBar
 import com.hackmit.app.ui.components.ScreenScaffold
 import com.hackmit.app.ui.components.severityColor
+import kotlinx.coroutines.launch
 
 @Composable
 fun ResultsScreen(vm: AssessmentViewModel, nav: NavController) {
@@ -45,6 +49,9 @@ fun ResultsScreen(vm: AssessmentViewModel, nav: NavController) {
     val context = LocalContext.current
     val alertConfig by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
     var showEmergencyDialog by remember { mutableStateOf(false) }
+    var voiceBusy by remember { mutableStateOf(false) }
+    var voiceError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     ScreenScaffold(title = "Results", onBack = { nav.popBackStack() }) { padding ->
         Column(
@@ -127,6 +134,33 @@ fun ResultsScreen(vm: AssessmentViewModel, nav: NavController) {
                             Text("Call emergency services")
                         }
                     }
+                    Button(
+                        enabled = !voiceBusy,
+                        onClick = {
+                            scope.launch {
+                                voiceBusy = true
+                                voiceError = null
+                                val question = "Summarize this stroke screening result for the patient " +
+                                    "in two or three short spoken sentences, including the overall score " +
+                                    "and the single most important next step."
+                                val task = "Overall score ${(assessment.overallScore * 100).toInt()}%, " +
+                                    "band ${assessment.band.label}. ${assessment.band.advice}"
+                                val answer = Agent.ask(vm.settingsStore, question, task)
+                                if (answer == null) {
+                                    voiceError = "Set a gateway URL + token in Settings to enable voice."
+                                } else {
+                                    Tts.speak(context, vm.settingsStore, answer) { voiceError = it }
+                                }
+                                voiceBusy = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (voiceBusy) "Speaking\u2026" else "Hear personalized result")
+                    }
+                    voiceError?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
 
@@ -181,17 +215,31 @@ fun ResultsScreen(vm: AssessmentViewModel, nav: NavController) {
                         )
                     },
                     confirmButton = {
-                        Button(
-                            onClick = {
-                                val number = alertConfig.emergencyNumber
-                                    .filter { it.isDigit() || it == '+' }
-                                    .ifBlank { "911" }
-                                context.startActivity(
-                                    Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")),
-                                )
-                                showEmergencyDialog = false
-                            },
-                        ) { Text("Open dialer") }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        val script = "This is StrokeSense. A possible stroke has been " +
+                                            "detected. Stay calm. Note the time the symptoms started. " +
+                                            "Do not eat, drink, or take aspirin. Call emergency services now."
+                                        Tts.speak(context, vm.settingsStore, script) { voiceError = it }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Speak emergency instructions") }
+                            Button(
+                                onClick = {
+                                    val number = alertConfig.emergencyNumber
+                                        .filter { it.isDigit() || it == '+' }
+                                        .ifBlank { "911" }
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")),
+                                    )
+                                    showEmergencyDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Open dialer") }
+                        }
                     },
                     dismissButton = {
                         OutlinedButton(onClick = { showEmergencyDialog = false }) { Text("Cancel") }

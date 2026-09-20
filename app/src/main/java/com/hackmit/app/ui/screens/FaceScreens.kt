@@ -40,6 +40,7 @@ import com.hackmit.app.ui.components.InfoRow
 import com.hackmit.app.ui.components.MockBadge
 import com.hackmit.app.ui.components.ScoreBar
 import com.hackmit.app.ui.components.ScreenScaffold
+import com.hackmit.app.ui.components.SpeakButton
 import com.hackmit.app.ui.components.rememberPermissionState
 import com.hackmit.app.video.FaceFrame
 import com.hackmit.app.video.MockFaceAnalyzer
@@ -71,7 +72,11 @@ fun FaceCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
     val steps = listOf("Neutral face", "Big smile", "Raise your eyebrows", "Close your eyes tightly")
     var step by remember { mutableIntStateOf(0) }
 
-    ScreenScaffold(title = "Face calibration", onBack = { nav.popBackStack() }) { padding ->
+    ScreenScaffold(
+        title = "Face calibration",
+        onBack = { nav.popBackStack() },
+        actions = { SpeakButton("Look straight at the camera and keep your face relaxed.", vm) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -136,7 +141,11 @@ fun FaceTestScreen(vm: AssessmentViewModel, nav: NavController) {
         }
     }
 
-    ScreenScaffold(title = "Face test", onBack = { nav.popBackStack() }) { padding ->
+    ScreenScaffold(
+        title = "Face test",
+        onBack = { nav.popBackStack() },
+        actions = { SpeakButton("Smile and show your teeth. Then frown. Check for drooping on one side.", vm) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)

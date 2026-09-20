@@ -29,6 +29,25 @@ never sees the Linq token. It only knows the gateway URL and a shared
 | `WS` | `/v1/deepgram/stream` | Deepgram proxy (auth: `Authorization: Token <gateway_token>`) |
 | `POST` | `/v1/webhooks/linq` | Linq webhook receiver (delivery/status events) |
 | `POST` | `/v1/linq/webhook-subscription` | Registers the webhook with Linq (token-protected) |
+| `POST` | `/v1/tts` | Local TTS (Kokoro, fallback Piper) → WAV |
+| `POST` | `/v1/agent` | Local voice agent (Ollama) Q&A |
+| `POST` | `/v1/speaker/enroll` | Enroll the user's voice for gating (raw PCM/WAV) |
+| `GET` | `/v1/speaker/status` | Gating status + enrollment state |
+
+### Voice (TTS + agent)
+- `POST /v1/tts` `{"text": "...", "voice": "af_heart"}` → `audio/wav`. Kokoro runs
+  on gx10; model files cache under `models/tts`. Falls back to Piper if Kokoro fails.
+- `POST /v1/agent` `{"question", "task_context", "history"}` → Ollama
+  (`OLLAMA_MODEL`) with task-aware system prompt. The Android app uses it for
+  personalized results and task Q&A.
+
+### Speaker gating
+`POST /v1/speaker/enroll` takes ≥1 s of 16 kHz PCM (raw or WAV); the gateway
+computes an ECAPA embedding (`speechbrain/spkrec-ecapa-voxceleb`) and stores it
+at `SPEAKER_EMBEDDING_PATH`. When `SPEAKER_GATE_ENABLED=true`, the Deepgram proxy
+only forwards speech windows whose embedding matches the enrolled speaker
+(cosine ≥ `SPEAKER_THRESHOLD`); everyone else is dropped on gx10 — their audio
+never reaches Deepgram.
 
 Request body (from the app):
 

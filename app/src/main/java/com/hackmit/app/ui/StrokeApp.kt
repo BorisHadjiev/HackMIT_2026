@@ -15,6 +15,7 @@ import com.hackmit.app.ui.screens.MotorCalibrationScreen
 import com.hackmit.app.ui.screens.MotorTestScreen
 import com.hackmit.app.ui.screens.ResultsScreen
 import com.hackmit.app.ui.screens.SettingsScreen
+import com.hackmit.app.ui.screens.SlurDemoScreen
 import com.hackmit.app.ui.screens.SpeechCalibrationScreen
 import com.hackmit.app.ui.screens.SpeechMonitorScreen
 import com.hackmit.app.ui.screens.SpeechTestScreen
@@ -28,6 +29,7 @@ object Routes {
     const val MOTOR_CALIB = "motor_calibration"
     const val MOTOR_TEST = "motor_test"
     const val MONITOR = "monitor"
+    const val SLUR_DEMO = "slur_demo"
     const val RESULTS = "results"
     const val SETTINGS = "settings"
 }
@@ -54,6 +56,7 @@ fun StrokeApp(container: AppContainer) {
         composable(Routes.MOTOR_CALIB) { MotorCalibrationScreen(vm, nav) }
         composable(Routes.MOTOR_TEST) { MotorTestScreen(vm, nav) }
         composable(Routes.MONITOR) { SpeechMonitorScreen(vm, nav) }
+        composable(Routes.SLUR_DEMO) { SlurDemoScreen(vm, nav) }
         composable(Routes.RESULTS) { ResultsScreen(vm, nav) }
         composable(Routes.SETTINGS) { SettingsScreen(vm, nav) }
     }

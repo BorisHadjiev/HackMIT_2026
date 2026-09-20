@@ -33,6 +33,7 @@ import com.hackmit.app.ui.components.LiveChart
 import com.hackmit.app.ui.components.MockBadge
 import com.hackmit.app.ui.components.ScoreBar
 import com.hackmit.app.ui.components.ScreenScaffold
+import com.hackmit.app.ui.components.SpeakButton
 import kotlinx.coroutines.flow.take
 
 private fun baselineOf(values: List<Float>): MotorBaseline {
@@ -72,7 +73,11 @@ fun MotorCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
         }
     }
 
-    ScreenScaffold(title = "Motor calibration", onBack = { nav.popBackStack() }) { padding ->
+    ScreenScaffold(
+        title = "Motor calibration",
+        onBack = { nav.popBackStack() },
+        actions = { SpeakButton("Hold both arms out in front of you, palms up, for ten seconds.", vm) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -147,7 +152,11 @@ fun MotorTestScreen(vm: AssessmentViewModel, nav: NavController) {
 
     val score = motorScore(samples)
 
-    ScreenScaffold(title = "Motor test", onBack = { nav.popBackStack() }) { padding ->
+    ScreenScaffold(
+        title = "Motor test",
+        onBack = { nav.popBackStack() },
+        actions = { SpeakButton("Hold both arms out, palms up, and close your eyes for ten seconds.", vm) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)

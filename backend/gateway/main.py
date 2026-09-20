@@ -11,15 +11,26 @@ from typing import Deque
 from urllib.parse import urlencode
 
 import httpx
+import numpy as np
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import ConnectionClosed
 
+from .agent import AgentClient
 from .config import Settings, get_settings
 from .database import Database
 from .linq import LinqClient, LinqError
-from .models import AlertEnvelope, AlertResponse, HealthResponse
+from .models import (
+    AgentRequest,
+    AgentResponse,
+    AlertEnvelope,
+    AlertResponse,
+    HealthResponse,
+    TtsRequest,
+)
+from .speaker import SpeakerGate, speech_segments
+from .tts import TtsEngine, TtsError, wav_bytes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("strokesense.gateway")
@@ -36,6 +47,9 @@ async def lifespan(app: FastAPI):
         app.state.settings = settings
         app.state.db = db
         app.state.linq = LinqClient(client, settings)
+        app.state.tts = TtsEngine(settings)
+        app.state.agent = AgentClient(settings)
+        app.state.speaker = SpeakerGate(settings)
         log.info(
             "gateway ready: linq=%s deepgram=%s recipients=%d auth=%s db=%s",
             settings.linq_configured,
@@ -241,6 +255,77 @@ async def register_linq_webhook(
     return {"webhook_url": webhook_url, "linq_response": linq_response}
 
 
+@app.post("/v1/tts")
+async def synthesize_speech(
+    req: TtsRequest,
+    request: Request,
+    x_alert_gateway_token: str | None = Header(default=None),
+) -> Response:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    try:
+        samples, rate = request.app.state.tts.synthesize(req.text, req.voice)
+    except TtsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return Response(
+        content=wav_bytes(samples, rate),
+        media_type="audio/wav",
+        headers={"Cache-Control": "max-age=3600"},
+    )
+
+
+@app.post("/v1/agent", response_model=AgentResponse)
+async def voice_agent(
+    req: AgentRequest,
+    request: Request,
+    x_alert_gateway_token: str | None = Header(default=None),
+) -> AgentResponse:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    result = await request.app.state.agent.answer(req.question, req.task_context, req.history)
+    return AgentResponse(**result)
+
+
+def _wav_to_pcm(body: bytes) -> np.ndarray:
+    """Accept RIFF WAV or raw 16 kHz PCM16; return float32 PCM."""
+    if body.startswith(b"RIFF"):
+        i = 12
+        while i + 8 <= len(body):
+            cid = body[i : i + 4]
+            size = int.from_bytes(body[i + 4 : i + 8], "little")
+            if cid == b"data":
+                pcm = np.frombuffer(body[i + 8 : i + 8 + size], dtype=np.int16)
+                return pcm.astype(np.float32) / 32768.0
+            i += 8 + size + (size & 1)
+    pcm = np.frombuffer(body, dtype=np.int16)
+    return pcm.astype(np.float32) / 32768.0
+
+
+@app.post("/v1/speaker/enroll")
+async def enroll_speaker(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    body = await request.body()
+    if len(body) < 16000:
+        raise HTTPException(status_code=400, detail="need at least 1s of 16 kHz PCM")
+    pcm = _wav_to_pcm(body)
+    dims = await asyncio.to_thread(request.app.state.speaker.enroll, pcm, 16000)
+    log.info("enrolled speaker embedding (%d dims)", dims)
+    return {"status": "enrolled", "dims": dims, "gating": settings.speaker_gate_enabled}
+
+
+@app.get("/v1/speaker/status")
+async def speaker_status(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    sp = request.app.state.speaker
+    return {
+        "gating_enabled": settings.speaker_gate_enabled,
+        "enrolled": sp._embedding is not None,
+        "threshold": settings.speaker_threshold,
+    }
+
+
 @app.websocket("/v1/deepgram/stream")
 async def deepgram_proxy(websocket: WebSocket) -> None:
     settings: Settings = websocket.app.state.settings
@@ -260,6 +345,7 @@ async def deepgram_proxy(websocket: WebSocket) -> None:
     await websocket.accept()
     params = {k: v for k, v in websocket.query_params.items() if k.lower() != "token"}
     dg_url = f"{_to_ws_url(settings.deepgram_base_url)}?{urlencode(params)}"
+    speaker: SpeakerGate = websocket.app.state.speaker
 
     try:
         async with ws_connect(
@@ -269,6 +355,7 @@ async def deepgram_proxy(websocket: WebSocket) -> None:
         ) as dg:
 
             async def client_to_dg() -> None:
+                gate_buf = bytearray() if speaker.enabled else None
                 try:
                     while True:
                         msg = await websocket.receive()
@@ -283,7 +370,28 @@ async def deepgram_proxy(websocket: WebSocket) -> None:
                             await dg.send(text)
                         data = msg.get("bytes")
                         if data is not None:
-                            await dg.send(data)
+                            if gate_buf is None:
+                                await dg.send(data)
+                            else:
+                                gate_buf += data
+                                if len(gate_buf) < 16000:
+                                    continue
+                                buf = bytes(gate_buf)
+                                samples = np.frombuffer(buf, dtype=np.int16).astype(np.float32) / 32768.0
+                                segs = speech_segments(samples, 16000)
+                                last_end = 0
+                                for start, end in segs:
+                                    emb = await asyncio.to_thread(speaker.embed_wav, samples[start:end])
+                                    ok, sim = speaker.is_user(emb)
+                                    if ok:
+                                        await dg.send(buf[start * 2 : end * 2])
+                                    else:
+                                        log.info("speaker gate: dropped segment sim=%.2f", sim)
+                                    last_end = end
+                                if last_end:
+                                    gate_buf[:] = buf[last_end * 2 :]
+                                elif len(gate_buf) > 32000:
+                                    gate_buf[:] = buf[-32000:]  # keep last ~2s tail
                 except Exception:
                     return
 

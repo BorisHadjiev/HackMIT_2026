@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     # Optional shared secret for verifying Linq webhook callbacks.
     webhook_secret: str = ""
 
+    # TTS (local, on gx10). Engine: kokoro (fallback piper).
+    tts_engine: str = "kokoro"
+    tts_voice: str = "af_heart"
+    tts_models_dir: str = "models/tts"
+
+    # Local LLM (Ollama) for the voice agent.
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen3.8:latest"
+
+    # Speaker gating for the Deepgram proxy.
+    speaker_gate_enabled: bool = False
+    speaker_threshold: float = 0.75
+    speaker_embedding_path: str = "speaker_embedding.npy"
+
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
     max_body_bytes: int = 16384

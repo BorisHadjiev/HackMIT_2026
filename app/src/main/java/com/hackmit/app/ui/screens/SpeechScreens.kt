@@ -40,6 +40,7 @@ import com.hackmit.app.ui.components.LiveChart
 import com.hackmit.app.ui.components.MockBadge
 import com.hackmit.app.ui.components.ScoreBar
 import com.hackmit.app.ui.components.ScreenScaffold
+import com.hackmit.app.ui.components.SpeakButton
 import com.hackmit.app.ui.components.rememberPermissionState
 import kotlinx.coroutines.delay
 import kotlin.math.sin
@@ -102,7 +103,11 @@ fun SpeechCalibrationScreen(vm: AssessmentViewModel, nav: NavController) {
         }
     }
 
-    ScreenScaffold(title = "Speech calibration", onBack = { nav.popBackStack() }) { padding ->
+    ScreenScaffold(
+        title = "Speech calibration",
+        onBack = { nav.popBackStack() },
+        actions = { SpeakButton("Repeat the phrase: the quick brown fox jumps over the lazy dog.", vm) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -258,7 +263,11 @@ fun SpeechTestScreen(vm: AssessmentViewModel, nav: NavController) {
         else -> mockSpeechMetrics(false)
     }
 
-    ScreenScaffold(title = "Speech test", onBack = { nav.popBackStack() }) { padding ->
+    ScreenScaffold(
+        title = "Speech test",
+        onBack = { nav.popBackStack() },
+        actions = { SpeakButton("Repeat the phrase: baby hippopotamus.", vm) },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)

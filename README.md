@@ -243,6 +243,16 @@ Linq integration token, enforces a recipient allowlist, dedupes retries by
   `wss://work.tail043976.ts.net/v1/deepgram/stream` (token-auth) by default, so
   the Deepgram key stays on the server. Override per-device via
   `local.properties` → `DEEPGRAM_PROXY_URL`.
+- **Voice (local):** the gateway runs **Kokoro TTS** (`/v1/tts`) and a **local
+  voice agent** (`/v1/agent`, Ollama). The app reads assessment instructions
+  aloud, speaks personalized results, and preps an emergency script for the
+  911 dialer.
+- **Speaker gating:** enroll your voice (Continuous monitoring → Enroll my
+  voice); the gateway then only forwards *your* speech to Deepgram — other
+  voices never leave the LAN.
+- **Slur validation:** `tools/slur_eval/` reproduces the detector in Python and
+  scores public dysarthria corpora (TORGO + UA-Speech with severity). See its
+  `README.md` for results and honest caveats.
 
 In the app, **Settings → Care alerts (Linq)**:
 

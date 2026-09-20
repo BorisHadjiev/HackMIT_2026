@@ -44,3 +44,19 @@ class HealthResponse(BaseModel):
     recipients_configured: bool
     alerts_recorded: int = 0
     webhook_events: int = 0
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+    voice: str | None = None
+
+
+class AgentRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    task_context: str = ""
+    history: list[dict] | None = None
+
+
+class AgentResponse(BaseModel):
+    answer: str
+    model: str = ""

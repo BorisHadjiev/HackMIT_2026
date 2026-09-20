@@ -28,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.hackmit.app.audio.AudioCapture
+import com.hackmit.app.audio.Speaker
 import com.hackmit.app.domain.AlertLevel
 import com.hackmit.app.ui.AssessmentViewModel
 import com.hackmit.app.ui.Routes
@@ -36,6 +38,8 @@ import com.hackmit.app.ui.components.ScoreBar
 import com.hackmit.app.ui.components.ScreenScaffold
 import com.hackmit.app.ui.components.severityColor
 import com.hackmit.app.ui.components.rememberPermissionState
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -58,6 +62,8 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
     var hasBaseline by remember { mutableStateOf(vm.baselineStore.load() != null) }
     var calibrating by remember { mutableStateOf(false) }
     var calibMessage by remember { mutableStateOf<String?>(null) }
+    var enrolling by remember { mutableStateOf(false) }
+    var enrollMessage by remember { mutableStateOf<String?>(null) }
 
     ScreenScaffold(title = "Continuous monitoring", onBack = { nav.popBackStack() }) { padding ->
         Column(
@@ -146,6 +152,46 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Speaker gating", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Enroll your voice so only you are transcribed — other speakers' audio " +
+                            "is filtered out on the gateway before it reaches Deepgram.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        enabled = micPermission.granted && !enrolling,
+                        onClick = {
+                            scope.launch {
+                                enrolling = true
+                                enrollMessage = null
+                                val pcm = ByteArrayOutputStream()
+                                val capture = AudioCapture { pcm.write(it) }
+                                if (!capture.start()) {
+                                    enrollMessage = "Microphone unavailable"
+                                } else {
+                                    delay(6000)
+                                    capture.stop()
+                                    enrollMessage = Speaker.enroll(vm.settingsStore, pcm.toByteArray())
+                                }
+                                enrolling = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (enrolling) "Enrolling\u2026 speak now" else "Enroll my voice (6s)")
+                    }
+                    enrollMessage?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

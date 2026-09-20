@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 import httpx
 import numpy as np
@@ -19,22 +20,35 @@ from .agent_voice import format_context
 
 log = logging.getLogger("strokesense.gateway.agent_auto")
 
+_MD = re.compile(r"[*_`#>]+")
+
+
+def plain(text: str) -> str:
+    """Strip markdown so TTS never reads 'star star' and no lists survive."""
+    text = _MD.sub("", text)
+    text = re.sub(r"(?m)^\s*\d+[.)]\s*", "", text)
+    return " ".join(text.split())
+
 SAMPLE_RATE = 16000
 
 FACT_ORDER = ["location", "symptoms", "onset", "responsive", "breathing"]
 
+# Matching priority (more specific intents first, so "what time did the symptoms
+# start?" maps to onset rather than the generic "symptoms").
+MATCH_ORDER = ["location", "onset", "responsive", "breathing", "symptoms"]
+
 FACT_KEYWORDS = {
     "location": ["where", "location", "address", "street", "place"],
-    "symptoms": ["symptom", "sign", "happening", "wrong", "describe", "look"],
-    "onset": ["how long", "when", "start", "onset", "ago", "time"],
+    "onset": ["how long", "when", "start", "onset", "ago", "time", "notice"],
     "responsive": ["awake", "responsive", "conscious", "alert", "respond", "talking"],
     "breathing": ["breath", "breathing", "airway"],
+    "symptoms": ["symptom", "sign", "happening", "wrong", "describe", "look", "doing"],
 }
 
 PHRASE_SYSTEM = (
     "You are the on-scene caller on an automated StrokeSense 911 call. You will be given one "
-    "fact; say it as ONE short, natural spoken sentence and nothing else. Do not list or add any "
-    "other fact. Never diagnose."
+    "fact; say it as ONE short, natural spoken sentence and nothing else. Plain text only: no "
+    "markdown, no asterisks, no lists. Do not add any other fact. Never diagnose."
 )
 
 
@@ -58,7 +72,7 @@ def build_facts(context: dict | None) -> dict[str, str]:
 
 def pick_fact(facts: dict[str, str], revealed: set[str], dispatcher_question: str) -> str:
     q = (dispatcher_question or "").lower()
-    for key in FACT_ORDER:
+    for key in MATCH_ORDER:
         if any(word in q for word in FACT_KEYWORDS[key]):
             return key
     for key in FACT_ORDER:
@@ -143,9 +157,13 @@ async def run_auto_caller(
             except Exception:
                 await websocket.send_text(msg)
                 continue
-            await websocket.send_text(msg)
 
             etype = event.get("type")
+            # We emit the canonical caller line ourselves, so drop Deepgram's STT of it.
+            if etype == "ConversationText" and event.get("role") == "user":
+                continue
+            await websocket.send_text(msg)
+
             if etype == "ConversationText" and event.get("role") == "assistant":
                 pending_assistant = (pending_assistant + " " + event.get("content", "")).strip()
             elif etype == "AgentAudioDone":
@@ -165,6 +183,7 @@ async def run_auto_caller(
                 except Exception as exc:  # noqa: BLE001
                     log.warning("auto caller LLM failed: %s", exc)
                     reply = fact
+                reply = plain(reply) or plain(fact)
                 await websocket.send_text(
                     json.dumps({"type": "ConversationText", "role": "user", "content": reply})
                 )

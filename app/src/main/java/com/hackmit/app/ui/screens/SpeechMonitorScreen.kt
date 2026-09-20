@@ -70,6 +70,7 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
     var aiTestBusy by remember { mutableStateOf(false) }
     var aiTestScore by remember { mutableStateOf<Float?>(null) }
     var aiTestMessage by remember { mutableStateOf<String?>(null) }
+    var aiTestMode by remember { mutableStateOf<String?>(null) }
 
     ScreenScaffold(title = "Continuous monitoring", onBack = { nav.popBackStack() }) { padding ->
         Column(
@@ -115,7 +116,15 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                     InfoRow("Status", if (state.running) "Monitoring" else "Stopped")
                     InfoRow("Speech", if (state.speechActive) "Detected" else "Silence")
                     InfoRow("Deepgram", state.deepgramStatus)
-                    state.aiScore?.let { InfoRow("AI slur score (WavLM)", "${(it * 100).toInt()}%") }
+                    state.aiScore?.let {
+                        InfoRow("AI slur score (WavLM)", "${(it * 100).toInt()}%")
+                    }
+                    if (state.aiMode != null) {
+                        InfoRow(
+                            "AI mode",
+                            if (state.aiMode == "personal") "Personal (calibrated)" else "Corpus",
+                        )
+                    }
                     InfoRow("Baseline", if (hasBaseline) "Ready" else "Not calibrated")
                     state.lastError?.let { InfoRow("Last error", it) }
                 }
@@ -210,8 +219,9 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                 ) {
                     Text("AI slur test (your voice)", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Records 4 seconds and sends it to the gx10 WavLM classifier for a " +
-                            "population slur score — no calibration needed.",
+                        "Records 4 seconds and sends it to the gx10 WavLM classifier. If you have " +
+                            "calibrated your voice baseline, it scores against your own voice " +
+                            "(personal mode); otherwise it uses the population model.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -231,6 +241,7 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                                     capture.stop()
                                     val wav = Wav.wrapPcm16(pcm.toByteArray())
                                     aiTestScore = SlurServer.analyze(vm.settingsStore, wav)
+                                    aiTestMode = SlurServer.mode(vm.settingsStore)
                                     if (aiTestScore == null) aiTestMessage = "Could not reach the AI server."
                                 }
                                 aiTestBusy = false
@@ -247,6 +258,8 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                             if (s >= 0.9447f) "Slurred" else "Clear",
                             valueColor = if (s >= 0.9447f) severityColor(1f) else Color(0xFF2E7D32),
                         )
+                        val modeText = aiTestMode ?: "corpus"
+                        InfoRow("Model", if (modeText == "personal") "Personal (your voice)" else "Population")
                     }
                     aiTestMessage?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall)

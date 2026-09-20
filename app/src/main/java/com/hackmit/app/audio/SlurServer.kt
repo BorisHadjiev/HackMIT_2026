@@ -39,4 +39,39 @@ object SlurServer {
             }
         }.getOrNull()
     }
+
+    /** Enrolls the user's voice (>= 8 s of speech) for personal-domain scoring. */
+    suspend fun calibrate(settings: SettingsStore, wav: ByteArray): Boolean = withContext(Dispatchers.IO) {
+        val config = settings.alertConfig.first()
+        if (config.gatewayUrl.isBlank() || config.gatewayToken.isBlank()) return@withContext false
+        val base = config.gatewayUrl.trim().trimEnd('/').substringBefore("/v1")
+        val request = Request.Builder()
+            .url("$base/v1/slur/calibrate")
+            .header("X-Alert-Gateway-Token", config.gatewayToken)
+            .header("Content-Type", "audio/wav")
+            .post(wav.toRequestBody("audio/wav".toMediaType()))
+            .build()
+        runCatching {
+            client.newCall(request).execute().use { resp ->
+                resp.isSuccessful && JSONObject(resp.body!!.string()).optString("status") == "enrolled"
+            }
+        }.getOrDefault(false)
+    }
+
+    /** Returns the current server-side mode ("personal" | "corpus") or null if unreachable. */
+    suspend fun mode(settings: SettingsStore): String? = withContext(Dispatchers.IO) {
+        val config = settings.alertConfig.first()
+        if (config.gatewayUrl.isBlank() || config.gatewayToken.isBlank()) return@withContext null
+        val base = config.gatewayUrl.trim().trimEnd('/').substringBefore("/v1")
+        val request = Request.Builder()
+            .url("$base/v1/slur/status")
+            .header("X-Alert-Gateway-Token", config.gatewayToken)
+            .get()
+            .build()
+        runCatching {
+            client.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) null else JSONObject(resp.body!!.string()).optString("mode", "corpus")
+            }
+        }.getOrNull()
+    }
 }

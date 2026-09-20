@@ -133,6 +133,14 @@ class SpeechMonitor(
             Log.d(TAG, "auto enrolling speaker voiceprint…")
             Speaker.enroll(settings, enrollPcm)
         }
+        // Calibrate the server-side AI slur scorer with the same voice sample so it
+        // switches from corpus to personal (domain-shifted) scoring.
+        if (enrollPcm.size >= 16_000 * 8) {
+            scope.launch {
+                val ok = SlurServer.calibrate(settings, Wav.wrapPcm16(enrollPcm))
+                Log.d(TAG, "slur AI calibration: ${if (ok) "enrolled (personal)" else "failed"}")
+            }
+        }
         val profile = BaselineStore.fromSamples(samples)
         Log.d(TAG, "baseline samples=${profile.sampleCount}")
         if (profile.sampleCount < MIN_BASELINE_SAMPLES) return null
@@ -245,6 +253,7 @@ class SpeechMonitor(
     private fun startAiScore() {
         aiJob?.cancel()
         aiJob = scope.launch {
+            _state.value = _state.value.copy(aiMode = SlurServer.mode(settings) ?: "corpus")
             while (isActive) {
                 delay(AI_INTERVAL_MS)
                 if (!running) break

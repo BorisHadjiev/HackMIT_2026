@@ -65,6 +65,8 @@ class SlurServer:
                 return {"detected": False, "error": "bad wav"}
             if x.size < MIN_SAMPLES:
                 x = np.pad(x, (0, MIN_SAMPLES - x.size))
+            rms = float(np.sqrt(np.mean(x.astype(np.float64) ** 2)))
+            log.info("slur analyze raw: bytes=%d dur=%.2fs rms=%.4f", len(body), x.size / 16000, rms)
             inputs = self._feature_extractor([x], sampling_rate=16000, return_tensors="pt")
             import torch
 

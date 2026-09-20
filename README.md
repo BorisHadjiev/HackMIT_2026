@@ -5,8 +5,8 @@ signals into one risk readout:
 
 | Module | Signal | Source |
 | --- | --- | --- |
-| Facial symmetry | drooping face / asymmetry | phone camera (MediaPipe FaceMesh) |
-| Speech | slurred speech | phone mic streamed to Deepgram |
+| Facial symmetry | drooping face / asymmetry | phone camera, analyzed on gx10 (MediaPipe + LR) |
+| Speech | slurred speech | phone mic → Deepgram proxy + on-device DSP + WavLM AI |
 | Motor / balance | arm drift + tremor | Arduino Uno IMU (gyro/accelerometer) |
 
 > **Not a medical device.** Screening aid only. If you suspect a stroke, call
@@ -20,28 +20,33 @@ The full flow is built and runs on a physical phone:
 
 `Home → Face calibration → Face test → Speech calibration → Speech test → Motor calibration → Motor test → Results`
 
-- All screens work today on **mock data** (badged `DEMO DATA`) so the demo never
-  depends on hardware.
-- Each test screen has a **Simulate abnormal** switch to show a positive screen.
-- The face screens show a **live front camera preview** (CameraX).
-- Speech calibration/test stream **real microphone audio to Deepgram** when an API
-  key is configured; otherwise they fall back to simulated transcripts.
+- **Face** uses the real **MediaPipe FaceLandmarker on the gx10 gateway** with a
+  validated logistic-regression asymmetry score (CV AUC 0.84) and a live
+  baseline-vs-actual comparison.
+- **Speech** streams real microphone audio through the **backend Deepgram proxy**
+  (the key stays server-side) and scores slur two ways: the on-device
+  personal-baseline detector and a server **AI slur score** (WavLM, CV AUC
+  0.95–0.997).
+- **Slur demo** (Home → Slur demo) runs bundled recordings (healthy vs. real
+  dysarthric patients) through the on-device detector with synchronized audio.
+- **Continuous monitoring** (slur detection) runs while the app is open:
+  mic → on-device acoustic features + Deepgram → personal-baseline detector +
+  server AI score → alerts (notification, auto-FAST, optional SMS).
+- The app reads instructions aloud via **local Kokoro TTS**, answers task
+  questions via a **local voice agent** (Ollama), and **gates other speakers**
+  out of Deepgram (server-side speaker verification).
 - The motor module uses a `MockSensorSource`; the Arduino transports are stubbed
   with clear TODOs.
-- **Continuous speech monitoring** (slur detection) runs while the app is open:
-  mic → VAD → on-device acoustic features + Deepgram → personal-baseline detector
-  → alerts (notification, auto-FAST, optional SMS). See below.
 
 ### Not wired up yet
 
-- `video/MediaPipeFaceAnalyzer` — needs `face_landmarker.task` in `app/src/main/assets`.
-- `sensor/BluetoothSppSource`, `BleSensorSource`, `WifiSensorSource` — pick one for
-  the Uno (HC-05 Classic BT, HM-10/ESP32 BLE, or an ESP WiFi gateway).
-- Deepgram key should eventually be proxied through a backend instead of shipped in
-  the APK.
+- `sensor/BluetoothSppSource`, `BleSensorSource`, `WifiSensorSource` — pick one
+  for the Uno (HC-05 Classic BT, HM-10/ESP32 BLE, or an ESP WiFi gateway).
 - Monitoring is **foreground-only** (stops when the app is backgrounded). The
-  `SpeechMonitor.begin/end` seam is where a foreground-service implementation can be
-  added later.
+  `SpeechMonitor.begin/end` seam is where a foreground-service implementation can
+  be added later.
+- Linq care-alert delivery is configured but the integration token currently has
+  **no provisioned phone number**, so sends return 502 until one is added.
 
 ---
 
@@ -94,22 +99,18 @@ adb shell am start -n com.hackmit.strokesense/com.hackmit.app.MainActivity
 
 ---
 
-## Deepgram setup (speech module)
+## Speech transcription & Deepgram
 
-The key can be provided two ways, in priority order:
+The app streams audio to the **backend Deepgram proxy** by default
+(`wss://work.tail043976.ts.net/v1/deepgram/stream`), so the Deepgram API key lives
+on the gx10 server (`.env` → `DEEPGRAM_API_KEY`) and **never ships in the APK**.
 
-1. **In the app:** Settings (gear icon) → paste the key → *Save key*.
-2. **At build time (convenient for demos):** add it to `local.properties`
-   (gitignored, never committed):
-
-   ```properties
-   DEEPGRAM_API_KEY=your_key_here
-   ```
-
-   It is exposed to the app as `BuildConfig.DEEPGRAM_API_KEY` and used as the
-   default when nothing is saved in Settings.
-
-Without a key, the speech screens run in demo mode with simulated transcripts.
+- Per-device proxy override: `local.properties` → `DEEPGRAM_PROXY_URL`
+  (defaults to the live gateway).
+- Direct-to-Deepgram fallback is only used when no proxy is configured: set the
+  key in the app (Settings → Speech transcription) or in the gitignored
+  `local.properties` → `DEEPGRAM_API_KEY`.
+- Without a key or proxy, the speech screens fall back to simulated transcripts.
 
 ---
 
@@ -126,13 +127,20 @@ Open **Home → Continuous monitoring**. The flow:
 
 How detection works:
 
-- **VAD** (energy + zero-crossing) gates audio so silence is never sent to Deepgram.
-- **On-device acoustic features**: pitch, jitter, shimmer, harmonics-to-noise
-  ratio, spectral centroid, and 4 Hz envelope-modulation rhythm.
+- **Streaming:** all captured audio is forwarded to Deepgram (via the gateway
+  proxy); Deepgram's server-side VAD (`SpeechStarted`/`UtteranceEnd`) drives the
+  speech state.
+- **On-device acoustic features:** pitch, jitter, shimmer, harmonics-to-noise
+  ratio, spectral centroid, and 4 Hz envelope-modulation rhythm — computed over
+  voiced 40 ms sub-frames.
 - **Deepgram** (Nova-3) adds transcript, word confidence, speech rate, pause ratio,
   and filler ratio. One persistent session with KeepAlive + auto-reconnect.
-- **`SlurDetector`** compares every ~2 s window to your baseline using z-scores,
-  smooths with EWMA, and uses CUSUM to require a sustained change before alerting.
+- **`SlurDetector`** compares every ~2 s window to your personal baseline using
+  z-scores, smooths with EWMA, and uses CUSUM to require a sustained change before
+  alerting.
+- **Server AI slur score:** every ~5 s while speech is audible the app uploads a
+  4 s window to the gateway's WavLM classifier (`/v1/slur/analyze`, CV AUC 0.95)
+  and shows it alongside the on-device detector.
 - **Alerts**: notification + in-app banner, an auto-run FAST assessment, and an
   optional SMS to an emergency contact (configure in **Settings → Emergency alerts**).
   The SMS has a 15 s cancel window to protect against false positives.
@@ -250,9 +258,14 @@ Linq integration token, enforces a recipient allowlist, dedupes retries by
 - **Speaker gating:** enroll your voice (Continuous monitoring → Enroll my
   voice); the gateway then only forwards *your* speech to Deepgram — other
   voices never leave the LAN.
+- **Server-side face:** `POST /v1/face/analyze` (MediaPipe FaceLandmarker +
+  trained LR, threshold 0.5535) — the app's face screens use it.
+- **Server-side slur:** `POST /v1/slur/analyze` (WavLM embedding + LR,
+  threshold 0.945) — the live monitor and "Record 4s + AI score" use it.
 - **Slur validation:** `tools/slur_eval/` reproduces the detector in Python and
-  scores public dysarthria corpora (TORGO + UA-Speech with severity). See its
-  `README.md` for results and honest caveats.
+  scores public dysarthria corpora (TORGO + UA-Speech with severity). The
+  on-device detector reaches AUC 0.62–0.72; a learned WavLM classifier reaches
+  **AUC 0.997 (TORGO) / 0.945 (pathological)**. See its `README.md`.
 
 In the app, **Settings → Care alerts (Linq)**:
 
@@ -301,10 +314,11 @@ app/src/main/java/com/hackmit/app/
   MainActivity.kt, StrokeApplication.kt
   ui/            theme, nav graph (StrokeApp.kt), AssessmentViewModel, screens/, components/
   domain/        Assessment, ModuleResult, Metric, RiskBand, MonitorModels
-  video/         FaceAnalyzer, AsymmetryCalculator (MediaPipe mirror-pair math)
+  video/         FaceAnalyzer, AsymmetryCalculator, FaceServer (client),
+                 FaceAnalysisController
   audio/         AudioCapture, DeepgramClient, DeepgramStream, Vad, Dsp,
-                 AcousticFeatureExtractor, SlurDetector, SpeechAnalyzer, SpeechSession,
-                 SpeechMonitor
+                 AcousticFeatureExtractor, SlurDetector, SlurServer (client),
+                 SpeechAnalyzer, SpeechSession, SpeechMonitor, Tts, Speaker, Wav
   alerts/        AlertManager (notifications, auto-FAST, SMS)
   alert/         alert drafts, summary factory, secure Linq gateway client, repository
   sensor/        SensorSource, MockSensorSource, BluetoothSppSource, BleSensorSource,
@@ -318,18 +332,20 @@ tools/rename.sh
 ### Tech stack
 
 Kotlin 2.0.21 · Jetpack Compose (Material 3) · Navigation Compose · CameraX ·
-MediaPipe Tasks Vision · OkHttp (Deepgram WebSocket) · DataStore · Lifecycle
-Process · AGP 8.9.2 · Gradle 8.14.4 · compile/target SDK 35 · min SDK 26.
+OkHttp (Deepgram WebSocket, gateway clients) · DataStore · Lifecycle Process ·
+AGP 8.9.2 · Gradle 8.14.4 · compile/target SDK 35 · min SDK 26.
+
+**Backend (gx10):** FastAPI + uvicorn (2 workers) · SQLite · Tailscale Funnel ·
+MediaPipe FaceLandmarker · WavLM (Transformers/PyTorch) · Kokoro TTS · Ollama ·
+whisper.cpp · Deepgram / Linq APIs.
 
 ---
 
 ## Next steps
 
-1. Drop `face_landmarker.task` into `app/src/main/assets` and implement
-   `MediaPipeFaceAnalyzer` on top of `AsymmetryCalculator`.
-2. Implement one Arduino transport (`BluetoothSppSource` is the quickest for an
+1. Implement one Arduino transport (`BluetoothSppSource` is the quickest for an
    Uno + HC-05) and select it in Settings.
-3. Tune slur thresholds with recorded normal vs. slurred clips (a WAV replay
-   harness is the next testing addition).
-4. Add a foreground service so monitoring survives backgrounding.
-5. Move the Deepgram key behind a small backend proxy.
+2. Add a foreground service so monitoring survives backgrounding.
+3. Provision a Linq phone number so care-alert delivery works end-to-end.
+4. Calibrate the server AI slur score on phone-mic audio (domain adaptation), so
+   normal phone speech isn't over-flagged.

@@ -28,8 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.hackmit.app.audio.Agent
 import com.hackmit.app.audio.Tts
+import com.hackmit.app.domain.Assessment
 import com.hackmit.app.domain.ModuleType
 import com.hackmit.app.domain.RiskBand
 import com.hackmit.app.alert.AlertConfig
@@ -140,17 +140,9 @@ fun ResultsScreen(vm: AssessmentViewModel, nav: NavController) {
                             scope.launch {
                                 voiceBusy = true
                                 voiceError = null
-                                val question = "Summarize this stroke screening result for the patient " +
-                                    "in two or three short spoken sentences, including the overall score " +
-                                    "and the single most important next step."
-                                val task = "Overall score ${(assessment.overallScore * 100).toInt()}%, " +
-                                    "band ${assessment.band.label}. ${assessment.band.advice}"
-                                val answer = Agent.ask(vm.settingsStore, question, task)
-                                if (answer == null) {
-                                    voiceError = "Set a gateway URL + token in Settings to enable voice."
-                                } else {
-                                    Tts.speak(context, vm.settingsStore, answer) { voiceError = it }
-                                }
+                                // Instant, deterministic summary (no LLM round-trip).
+                                val summary = spokenSummary(assessment)
+                                Tts.speak(context, vm.settingsStore, summary) { voiceError = it }
                                 voiceBusy = false
                             }
                         },
@@ -247,5 +239,17 @@ fun ResultsScreen(vm: AssessmentViewModel, nav: NavController) {
                 )
             }
         }
+    }
+}
+
+private fun spokenSummary(a: Assessment): String {
+    val pct = (a.overallScore * 100).toInt()
+    val opening = if (a.band == RiskBand.HIGH) "A possible stroke has been detected." else "Your screening result is ready."
+    fun scoreOf(type: ModuleType) = a.results[type]?.let { "${(it.score * 100).toInt()} percent" } ?: "not measured"
+    return buildString {
+        append(opening)
+        append(" Your overall score is $pct percent, rated ${a.band.label}. ")
+        append("Face: ${scoreOf(ModuleType.FACE)}. Speech: ${scoreOf(ModuleType.SPEECH)}. Motor: ${scoreOf(ModuleType.MOTOR)}. ")
+        append(a.band.advice)
     }
 }

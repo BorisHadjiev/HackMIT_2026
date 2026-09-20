@@ -126,6 +126,12 @@ fun ResultsScreen(vm: AssessmentViewModel, nav: NavController) {
                             },
                         )
                     }
+                    if (vm.alertDelivery.status == AlertDeliveryStatus.NOT_CONFIGURED) {
+                        OutlinedButton(
+                            onClick = { nav.navigate(Routes.SETTINGS) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Set up caregiver in Settings") }
+                    }
                     if (assessment.band == RiskBand.HIGH) {
                         OutlinedButton(
                             onClick = { showEmergencyDialog = true },

@@ -30,6 +30,19 @@ port of `app/src/main/java/com/hackmit/app/audio/{SlurDetector,Dsp}.kt`.
   on voiced 40 ms frames) that shipped in the app — the earlier full-window
   DSP scored 0.48 / 0.62.
 
+### Learned classifiers (speaker-disjoint, pooled leave-speaker-out AUC)
+SSL embeddings are **mean+std pooled last-hidden-state** of WavLM-base-plus.
+
+| Corpus | Detector (z) | Handcrafted LR | **SSL LR** | **Fusion LR** |
+| --- | --- | --- | --- | --- |
+| TORGO (5 spk) | 0.69 | 0.77 | **0.997** | **0.997** |
+| pathological (12 spk) | 0.72 | 0.66 | **0.945** | **0.951** |
+
+- Severity Spearman on pathological (fusion): **0.19** (positive, n=2000).
+- Model params exported to `slur_classifier_{torgo,pathological}.json`
+  (StandardScaler + LogisticRegression over handcrafted + 1536-d SSL features);
+  see `ssl_embed.py` and `train_classifier.py`.
+
 ## Validation of the DSP port
 A clean 200 Hz tone yields f0=200.0 Hz, jitter=0.000, shimmer=0.000, HNR=40 dB;
 a frequency-modulated tone yields jitter≈0.009 — the port matches the app.

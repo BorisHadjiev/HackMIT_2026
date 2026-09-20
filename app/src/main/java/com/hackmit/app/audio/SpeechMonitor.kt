@@ -152,8 +152,10 @@ class SpeechMonitor(
         sentFrames = 0L
         dgConnected = false
         dgSpeechActive = false
-        recentPcm.clear()
-        recentBytes = 0
+        synchronized(recentPcm) {
+            recentPcm.clear()
+            recentBytes = 0
+        }
         latestTranscript = ""
         windowFrames = 0
         windowSpeechFrames = 0
@@ -220,10 +222,12 @@ class SpeechMonitor(
                     val frameBytes = AudioCapture.toBytes(frame)
                     deepgram?.send(frameBytes)
                     if (calibrating) enrollBuffer.write(frameBytes)
-                    recentPcm.addLast(frameBytes)
-                    recentBytes += frameBytes.size
-                    while (recentBytes > RECENT_PCM_BYTES && recentPcm.size > 1) {
-                        recentBytes -= recentPcm.removeFirst().size
+                    synchronized(recentPcm) {
+                        recentPcm.addLast(frameBytes)
+                        recentBytes += frameBytes.size
+                        while (recentBytes > RECENT_PCM_BYTES && recentPcm.size > 1) {
+                            recentBytes -= recentPcm.removeFirst().size
+                        }
                     }
                     sentFrames++
                     windowFrames++
@@ -259,10 +263,11 @@ class SpeechMonitor(
     }
 
     private fun recentHasEnergy(): Boolean {
+        val snapshot = synchronized(recentPcm) { recentPcm.toList() }
         if (recentBytes < 16_000) return false // need >= 0.5 s
         var sum = 0.0
         var n = 0
-        for (chunk in recentPcm) {
+        for (chunk in snapshot) {
             var i = 0
             while (i + 1 < chunk.size) {
                 val s = (((chunk[i + 1].toInt() and 0xFF) shl 8) or (chunk[i].toInt() and 0xFF)).toShort().toInt()
@@ -276,10 +281,13 @@ class SpeechMonitor(
     }
 
     private fun buildRecentWav(): ByteArray? {
-        if (recentPcm.isEmpty()) return null
-        val data = ByteArray(recentBytes)
+        val snapshot = synchronized(recentPcm) { recentPcm.toList() }
+        if (snapshot.isEmpty()) return null
+        val total = snapshot.sumOf { it.size }
+        if (total == 0) return null
+        val data = ByteArray(total)
         var offset = 0
-        for (chunk in recentPcm) {
+        for (chunk in snapshot) {
             chunk.copyInto(data, offset)
             offset += chunk.size
         }

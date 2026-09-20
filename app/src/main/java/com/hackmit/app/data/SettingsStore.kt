@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.hackmit.app.BuildConfig
 import com.hackmit.app.alert.AlertConfig
+import com.hackmit.app.sensor.SensorTransport
+import com.hackmit.app.sensor.SleepWindow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -31,6 +33,10 @@ class SettingsStore(private val context: Context) {
     private val keySensitivity = floatPreferencesKey("alert_sensitivity")
     private val keyContact = stringPreferencesKey("emergency_contact")
     private val keySms = booleanPreferencesKey("alert_sms_enabled")
+    private val keyBuzzCooldown = floatPreferencesKey("buzz_cooldown_minutes")
+    private val keySleepEnabled = booleanPreferencesKey("sleep_hours_enabled")
+    private val keySleepStart = stringPreferencesKey("sleep_hours_start")
+    private val keySleepEnd = stringPreferencesKey("sleep_hours_end")
 
     val deepgramKey: Flow<String> = context.dataStore.data.map {
         it[keyDeepgram]?.takeIf { k -> k.isNotBlank() } ?: BuildConfig.DEEPGRAM_API_KEY
@@ -58,6 +64,18 @@ class SettingsStore(private val context: Context) {
     val alertSensitivity: Flow<Float> = context.dataStore.data.map { it[keySensitivity] ?: 0.55f }
     val emergencyContact: Flow<String> = context.dataStore.data.map { it[keyContact].orEmpty() }
     val alertSmsEnabled: Flow<Boolean> = context.dataStore.data.map { it[keySms] ?: false }
+    val buzzCooldownMinutes: Flow<Float> = context.dataStore.data.map {
+        it[keyBuzzCooldown] ?: 1.0f
+    }
+
+    /** Quiet hours during which the board must not buzz. Off until the user sets it. */
+    val sleepHours: Flow<SleepWindow> = context.dataStore.data.map {
+        SleepWindow(
+            enabled = it[keySleepEnabled] ?: false,
+            start = it[keySleepStart]?.takeIf(String::isNotBlank) ?: "22:00",
+            end = it[keySleepEnd]?.takeIf(String::isNotBlank) ?: "07:00",
+        )
+    }
 
     suspend fun setDeepgramKey(value: String) {
         context.dataStore.edit { it[keyDeepgram] = value.trim() }
@@ -79,6 +97,18 @@ class SettingsStore(private val context: Context) {
         context.dataStore.edit { it[keyTransport] = value }
     }
 
+    /**
+     * Writes mock + transport together so they cannot drift. [address] is optional
+     * so a Mock tap does not wipe a saved MAC.
+     */
+    suspend fun setSensorSource(transport: SensorTransport, address: String? = null) {
+        context.dataStore.edit {
+            it[keyMock] = transport == SensorTransport.MOCK
+            it[keyTransport] = transport.name
+            if (address != null) it[keyMac] = address.trim()
+        }
+    }
+
     suspend fun setConsentGranted(value: Boolean) {
         context.dataStore.edit { it[keyConsent] = value }
     }
@@ -97,6 +127,18 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setAlertSmsEnabled(value: Boolean) {
         context.dataStore.edit { it[keySms] = value }
+    }
+
+    suspend fun setBuzzCooldownMinutes(value: Float) {
+        context.dataStore.edit { it[keyBuzzCooldown] = value.coerceIn(0.01f, 1440f) }
+    }
+
+    suspend fun setSleepHours(value: SleepWindow) {
+        context.dataStore.edit {
+            it[keySleepEnabled] = value.enabled
+            it[keySleepStart] = value.start.trim()
+            it[keySleepEnd] = value.end.trim()
+        }
     }
 
     suspend fun setAlertConfig(value: AlertConfig) {

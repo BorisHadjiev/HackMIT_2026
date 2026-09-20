@@ -26,3 +26,16 @@ fun rememberPermissionState(permission: String): PermissionState {
     ) { granted = it }
     return PermissionState(granted) { launcher.launch(permission) }
 }
+
+@Composable
+fun rememberPermissionsState(permissions: Array<String>): PermissionState {
+    val context = LocalContext.current
+    fun allGranted() = permissions.all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+    var granted by remember(permissions.contentHashCode()) { mutableStateOf(allGranted()) }
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { granted = it.values.all { value -> value } && allGranted() }
+    return PermissionState(granted) { launcher.launch(permissions) }
+}

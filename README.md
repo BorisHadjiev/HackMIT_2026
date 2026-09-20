@@ -7,7 +7,7 @@ signals into one risk readout:
 | --- | --- | --- |
 | Facial symmetry | drooping face / asymmetry | phone camera, analyzed on gx10 (MediaPipe + LR) |
 | Speech | slurred speech | phone mic → Deepgram proxy + on-device DSP + WavLM AI |
-| Motor / balance | arm drift + tremor | Arduino Uno IMU (gyro/accelerometer) |
+| Motor / balance | uneven arm raise (left vs. right arm angle) | Arduino **UNO Q** + two MPU-6050 IMUs over **BLE** |
 
 > **Not a medical device.** Screening aid only. If you suspect a stroke, call
 > emergency services immediately.
@@ -22,11 +22,13 @@ The full flow is built and runs on a physical phone:
 
 - **Face** uses the real **MediaPipe FaceLandmarker on the gx10 gateway** with a
   validated logistic-regression asymmetry score (CV AUC 0.84) and a live
-  baseline-vs-actual comparison.
+  baseline-vs-actual comparison. The face screens also show a **live front
+  camera preview** (CameraX).
 - **Speech** streams real microphone audio through the **backend Deepgram proxy**
   (the key stays server-side) and scores slur two ways: the on-device
   personal-baseline detector and a server **AI slur score** (WavLM, CV AUC
-  0.95–0.997).
+  0.95–0.997). Without a configured backend they fall back to simulated
+  transcripts.
 - **Slur demo** (Home → Slur demo) runs bundled recordings (healthy vs. real
   dysarthric patients) through the on-device detector with synchronized audio.
 - **Continuous monitoring** (slur detection) runs while the app is open:
@@ -35,13 +37,19 @@ The full flow is built and runs on a physical phone:
 - The app reads instructions aloud via **local Kokoro TTS**, answers task
   questions via a **local voice agent** (Ollama), and **gates other speakers**
   out of Deepgram (server-side speaker verification).
-- The motor module uses a `MockSensorSource`; the Arduino transports are stubbed
-  with clear TODOs.
+- The **motor module talks to real hardware over BLE** — see
+  [Connecting the Arduino IMU](#connecting-the-arduino-imu). It shows live **Left /
+  Right / Diff** cards, a three-series chart, and a filled human silhouette at the
+  **bottom** of Motor calibration and Motor test (`BodyFigure.kt` /
+  `BodyPoseFigure`). Arduino cue controls send cooldown (`SETCOOLDOWN`), sleep
+  hours (`SETSLEEP`), and Start/Stop (`START` / `STOP`). **Disconnect** sends
+  `STOP` then tears down GATT; Status becomes `Disconnected`.
+- Every screen can still run on **mock data** (badged `DEMO DATA`) so the demo
+  never depends on hardware, including a simulated uneven arm raise.
+- Each test screen has a **Simulate abnormal** switch to show a positive screen.
 
 ### Not wired up yet
 
-- `sensor/BluetoothSppSource`, `BleSensorSource`, `WifiSensorSource` — pick one
-  for the Uno (HC-05 Classic BT, HM-10/ESP32 BLE, or an ESP WiFi gateway).
 - Monitoring is **foreground-only** (stops when the app is backgrounded). The
   `SpeechMonitor.begin/end` seam is where a foreground-service implementation can
   be added later.
@@ -74,21 +82,40 @@ yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
 
 ---
 
-## Build and run
+## Build and install
+
+Gradle needs to find a JDK 17+ and the SDK. Set both before building:
 
 ```bash
-# Build the debug APK
-./gradlew :app:assembleDebug
-
-# Build + install on the connected phone
-./gradlew installDebug
-
-# Or install an already-built APK
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+export JAVA_HOME=/path/to/jdk-21
+export ANDROID_SDK_ROOT="$HOME/ext/Coding/android/sdk"
+export ANDROID_HOME="$ANDROID_SDK_ROOT"
 ```
 
-Then open **StrokeSense** on the phone. On first use, grant the camera and
-microphone permissions (the app asks on the relevant screens).
+```powershell
+# PowerShell equivalent
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-21"
+$env:ANDROID_SDK_ROOT = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_HOME = $env:ANDROID_SDK_ROOT
+```
+
+Then:
+
+```bash
+# Build the debug APK -> app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleDebug
+
+# Install the built APK on the connected phone
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Or do both in one step
+./gradlew installDebug
+```
+
+On Windows use `.\gradlew.bat` instead of `./gradlew`.
+
+Then open **StrokeSense** on the phone. On first use, grant the camera, microphone and
+Bluetooth permissions (the app asks on the relevant screens).
 
 Quick sanity check:
 
@@ -96,6 +123,122 @@ Quick sanity check:
 adb devices                       # phone should be listed
 adb shell am start -n com.hackmit.strokesense/com.hackmit.app.MainActivity
 ```
+
+The installed package is `com.hackmit.strokesense`; the internal Kotlin namespace is
+`com.hackmit.app` (see [Rename the app](#rename-the-app)). Compose, `minSdk 26`,
+`targetSdk 35`.
+
+---
+
+## Connecting the Arduino IMU
+
+> ### The board will NOT appear in Android's Bluetooth settings
+>
+> The UNO Q advertises as a **BLE-only GATT peripheral** named `StrokeSense`. Android's
+> system Bluetooth screen lists pairable Classic devices, so `StrokeSense` will normally
+> never show up there and generally **cannot be bonded**. Do not try to pair it.
+> Discovery happens **inside this app**. This is the single biggest source of confusion
+> with this setup.
+
+Board firmware and the BLE bridge live in the companion repo `raise-hands-imu` (MCU
+sketch + a Python bridge that runs on the UNO Q's Debian host as a systemd user unit).
+Make sure the board is powered and the bridge is advertising before scanning.
+
+### Tap sequence
+
+1. **Settings** (gear icon on Home) → scroll to **Arduino IMU**.
+2. Tap **Uno Q BLE** (or **Mock data**). There is one exclusive choice — no
+   separate "Use mock sensors" switch. Tapping BLE persists `mockSensors=false`
+   and `sensorTransport=BLE` together (`SettingsStore.setSensorSource`).
+3. Tap **Scan for StrokeSense** and grant Bluetooth permission if asked. Matching
+   advertisers appear as chips showing name, MAC and RSSI — tap the board.
+   Or paste the MAC **`14:B5:CD:F3:98:71`** (this board) into **Board MAC**.
+4. Tap **Connect to board**. The green banner should read **Connected · StrokeSense**
+   with the MAC. **Disconnect** tears the link down; **Reconnect** on the motor
+   screens opens it again.
+5. Go to **Motor / balance** from Home. Motor calibration and Motor test both show
+   the same connection banner, live **Left / Right / Diff** cards (dashed when
+   not connected), a live chart, Arduino cue controls, and a
+   filled silhouette at the **bottom** of the screen (see below).
+6. On the **Arduino cue** card: set cooldown minutes and tap **Send cooldown to
+   Arduino** (`SETCOOLDOWN`), optionally set **Sleep hours** and tap **Send sleep
+   hours** (`SETSLEEP`), then **Start arm test** (`START`) with **Stop** beside it
+   (`STOP`).
+7. Raise both arms until they match. The board's buzzers stop, then wait the cooldown
+   before rearming.
+
+The motor screens also **auto-scan when no MAC is saved**, save whatever they find, and
+show a persistent banner (not a small Status row): green **Connected · StrokeSense**
+plus MAC when live, amber **Connecting…** / **Scanning…**, red **Not connected** /
+**Disconnected**, gray **Mock data**. **Reconnect** and **Disconnect** sit together
+whenever BLE is selected. **Disconnect** sends `STOP`, then tears down GATT
+(`SensorRepository.stopAndDisconnect()`). The same teardown runs when you leave the
+screen (`AssessmentViewModel.releaseSensor`). Settings has the same banner and
+Disconnect control.
+
+### Motor silhouette (`BodyFigure.kt` / `BodyPoseFigure`)
+
+A **minimal filled silhouette** sits at the **bottom** of Motor calibration and
+Motor test (`ArmPoseSection`). It is authored in a **3:5** box and always scaled
+uniformly, so Expand cannot stretch it to the window:
+
+- teal left arm, green right arm, muted body;
+- arm elevation: **0° hanging down**, **~60° horizontal** (firmware's full raise;
+  anything past 60° lifts a little further);
+- a small coral **Δ** when the left/right difference is **≥ 8°** (no leader lines).
+
+**Expand** centers the same 3:5 figure in a full-screen dialog. **Close** or
+system back collapses it.
+
+### Sleep hours and cooldown
+
+Quiet hours are a user-set **start** and **end** (overnight windows are valid;
+times default to **22:00–07:00**, off until you send them). The phone sends
+`SETSLEEP,HH:MM,HH:MM` or `SETSLEEP,OFF`. The STM32 has no RTC, so the Linux host enforces the window on its
+wall clock and drives an MCU `SLEEP,1` latch that blocks the buzzers. Cooldown is
+`SETCOOLDOWN,<minutes>` (0.01–1440). Start/Stop are `START` / `STOP`. The saved
+cooldown and sleep window are re-pushed on every fresh link.
+
+### Bluetooth permissions
+
+BLE *scanning* is stricter than connecting:
+
+| Android | Runtime permissions needed to scan |
+| --- | --- |
+| API 26–30 (8.0–11) | `ACCESS_FINE_LOCATION` — without it the scanner silently returns **no results** |
+| API 31+ (12 and up) | `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` |
+
+The app requests the right set per API level (`sensor/BluetoothDevices.kt`) and surfaces
+"Turn Bluetooth on" separately from a permission problem.
+
+### What the motor module actually measures
+
+The board streams mapped pitch per hand (`0` = arm down, higher = raised) plus the
+absolute difference, at roughly 7 Hz:
+
+```
+ANG,L,45.2,R,43.1,DIFF,2.1
+```
+
+Scoring is based on **sustained left/right asymmetry** — a weighted blend of mean
+difference and peak difference over the collected window — replacing the older
+accelerometer-magnitude drift/tremor heuristic. The calibration screen records a 3 s
+baseline (60 samples) of left / right / difference. A missing sensor arrives as `nan` and
+is skipped rather than treated as zero.
+
+### No hardware?
+
+Leave **Use mock sensors** on. `MockSensorSource` synthesises a plausible two-arm raise,
+and the motor test screen has a **Simulate uneven arm raise** switch that makes the left
+arm lag so a positive screen can be demoed.
+
+### Cold-boot recovery is set up but unvalidated
+
+On the board side, everything needed for the BLE bridge to come back by itself after a
+power-bank cold boot is configured (systemd user-unit lingering, the unit enabled, and
+`Restart=always`). **This was never empirically validated** — nobody confirmed a full
+unattended battery cold boot ending in a successful phone connection. Budget time to
+power-cycle the board and re-check before demoing on battery.
 
 ---
 
@@ -105,11 +248,24 @@ The app streams audio to the **backend Deepgram proxy** by default
 (`wss://work.tail043976.ts.net/v1/deepgram/stream`), so the Deepgram API key lives
 on the gx10 server (`.env` → `DEEPGRAM_API_KEY`) and **never ships in the APK**.
 
-- Per-device proxy override: `local.properties` → `DEEPGRAM_PROXY_URL`
-  (defaults to the live gateway).
+- Per-device proxy override: Settings → **Speech transcription** → Deepgram
+  proxy URL, or `local.properties` → `DEEPGRAM_PROXY_URL` (defaults to the live
+  gateway). The direct API-key field is intentionally disabled while proxy mode
+  is the default.
 - Direct-to-Deepgram fallback is only used when no proxy is configured: set the
   key in the app (Settings → Speech transcription) or in the gitignored
   `local.properties` → `DEEPGRAM_API_KEY`.
+- Build-time defaults (gitignored `local.properties`, exposed as `BuildConfig`):
+
+  ```properties
+  DEEPGRAM_API_KEY=your_key_here
+  DEEPGRAM_PROXY_URL=wss://host/v1/deepgram/stream
+  GATEWAY_BASE_URL=https://host
+  GATEWAY_TOKEN=shared_demo_token
+  ```
+
+  These are used when nothing is saved in Settings. **Do not commit real values**
+  — `gradle.properties` deliberately leaves `GATEWAY_TOKEN` empty.
 - Without a key or proxy, the speech screens fall back to simulated transcripts.
 
 ---
@@ -142,7 +298,7 @@ How detection works:
   4 s window to the gateway's WavLM classifier (`/v1/slur/analyze`, CV AUC 0.95)
   and shows it alongside the on-device detector.
 - **Alerts**: notification + in-app banner, an auto-run FAST assessment, and an
-  optional SMS to an emergency contact (configure in **Settings → Emergency alerts**).
+  optional SMS to an emergency contact (configure in **Settings → Emergency SMS**).
   The SMS has a 15 s cancel window to protect against false positives.
 
 Required permissions: `RECORD_AUDIO`, `POST_NOTIFICATIONS` (Android 13+), and
@@ -154,14 +310,19 @@ Tune sensitivity with the slider on the monitor screen (higher = more sensitive)
 
 ## Tests
 
-JVM unit tests cover the DSP and detector (no device needed):
+JVM unit tests cover the DSP, detector and sensor parsing (no device needed):
 
 ```bash
 ./gradlew :app:testDebugUnitTest
 ```
 
-`DspTest` verifies pitch, jitter/shimmer, RMS, ZCR, spectral centroid and FFT on
-synthetic signals; `SlurDetectorTest` verifies baseline comparison and alerting.
+- `audio/DspTest` — pitch, jitter/shimmer, RMS, ZCR, spectral centroid and FFT on
+  synthetic signals.
+- `audio/SlurDetectorTest` — baseline comparison and alerting.
+- `sensor/ArmAngleParserTest` — `ANG,...` frames, `nan` handling, the legacy
+  `L 45.2  R 43.1` serial form, and ignoring firmware debug lines.
+- `sensor/BleScanMatchTest` — matching the board by service UUID *or* by local name, since
+  BlueZ may drop the UUID list to fit the 31-byte legacy advertising payload.
 
 ---
 
@@ -172,7 +333,7 @@ for a high-concern result, offers a **Call emergency services** button. The call
 button only opens Android's dialer after a confirmation tap; the app never places
 an emergency call automatically.
 
-Configure these in Settings → **Care alerts (Linq)**:
+Configure these in Settings → **Care alerts** and **Backend gateway**:
 
 - an HTTPS URL for your app-owned alert gateway;
 - an optional alert-gateway token for the local backend demo (not a Linq key);
@@ -203,13 +364,13 @@ Android modules are deliberately reusable:
 - `alert/LinqAlertGateway.kt`: sends the envelope and preserves an optional Linq
   trace ID returned by the gateway.
 - `alert/AlertRepository.kt`: the UI-facing coordinator; use
-`AssessmentViewModel.sendExternalAlert(AlertSource.DEEPGRAM, ...)` or
+  `AssessmentViewModel.sendExternalAlert(AlertSource.DEEPGRAM, ...)` or
   `AssessmentViewModel.sendExternalAlert(AlertSource.ELASTIC, ...)` for future
-integrations.
+  integrations.
 
 For the companion FastAPI backend, put the Linq key in its uncommitted `.env` as
-`LINQ_API_KEY`; do not add it to Android's `local.properties`, Settings, or any
-tracked source file. The Android **Alert gateway token** field is only for that
+`LINQ_API_TOKEN`; do not add it to Android's `local.properties`, Settings, or any
+tracked source file. The Android **Gateway token** field is only for that
 backend's optional demo protection and is not a Linq credential.
 
 For example, a future Deepgram policy can share metrics after the user finishes a
@@ -267,10 +428,10 @@ Linq integration token, enforces a recipient allowlist, dedupes retries by
   on-device detector reaches AUC 0.62–0.72; a learned WavLM classifier reaches
   **AUC 0.997 (TORGO) / 0.945 (pathological)**. See its `README.md`.
 
-In the app, **Settings → Care alerts (Linq)**:
+In the app, **Settings → Backend gateway / Care alerts**:
 
 - Gateway URL: `https://work.tail043976.ts.net/v1/stroke-alerts`
-- Gateway token: the shared demo token
+- Gateway token: the shared demo token (kept in `local.properties`, not here)
 - Trusted contact: your phone (E.164, e.g. `+15551234567`)
 
 ### Run the backend yourself
@@ -312,7 +473,8 @@ One-command rename (no source files move — the internal Kotlin namespace stays
 ```
 app/src/main/java/com/hackmit/app/
   MainActivity.kt, StrokeApplication.kt
-  ui/            theme, nav graph (StrokeApp.kt), AssessmentViewModel, screens/, components/
+  ui/            theme, nav graph (StrokeApp.kt), AssessmentViewModel, screens/,
+                 components/ (BodyFigure.kt filled silhouette, SleepHoursEditor)
   domain/        Assessment, ModuleResult, Metric, RiskBand, MonitorModels
   video/         FaceAnalyzer, AsymmetryCalculator, FaceServer (client),
                  FaceAnalysisController
@@ -321,13 +483,22 @@ app/src/main/java/com/hackmit/app/
                  SpeechAnalyzer, SpeechSession, SpeechMonitor, Tts, Speaker, Wav
   alerts/        AlertManager (notifications, auto-FAST, SMS)
   alert/         alert drafts, summary factory, secure Linq gateway client, repository
-  sensor/        SensorSource, MockSensorSource, BluetoothSppSource, BleSensorSource,
-                 WifiSensorSource, SensorRepository
+  sensor/        SensorSource (+ SensorSample, ANG parser), MockSensorSource,
+                 BleSensorSource (UNO Q Nordic UART), BleScanner (scan + match),
+                 BluetoothDevices (per-API permissions), SleepWindow,
+                 SensorRepository (MOCK / BLE only; stale BLUETOOTH_SPP / WIFI → BLE)
   scoring/       StrokeRiskScorer (weighted FAST bands)
   data/          SettingsStore, BaselineStore
-app/src/test/java/com/hackmit/app/audio/   DspTest, SlurDetectorTest
+app/src/test/java/com/hackmit/app/
+  audio/         DspTest, SlurDetectorTest
+  sensor/        ArmAngleParserTest, BleScanMatchTest
+backend/         FastAPI care-alert gateway + Deepgram proxy + local voice
 tools/rename.sh
+tools/slur_eval/ offline Python port of SlurDetector + dysarthria-corpus evaluation
 ```
+
+Board firmware and the BLE bridge live in a separate repo (`raise-hands-imu`): the STM32
+sketch plus the Python/BlueZ bridge that runs on the UNO Q's Debian host.
 
 ### Tech stack
 
@@ -343,9 +514,12 @@ whisper.cpp · Deepgram / Linq APIs.
 
 ## Next steps
 
-1. Implement one Arduino transport (`BluetoothSppSource` is the quickest for an
-   Uno + HC-05) and select it in Settings.
-2. Add a foreground service so monitoring survives backgrounding.
-3. Provision a Linq phone number so care-alert delivery works end-to-end.
-4. Calibrate the server AI slur score on phone-mic audio (domain adaptation), so
+1. Validate board cold-boot recovery on battery, end to end, with no PC attached.
+2. Tune the motor asymmetry thresholds against real arm-raise recordings; the
+   current mean/peak difference weights are hand-picked.
+3. Add a foreground service so monitoring survives backgrounding.
+4. Provision a Linq phone number so care-alert delivery works end-to-end.
+5. Calibrate the server AI slur score on phone-mic audio (domain adaptation), so
    normal phone speech isn't over-flagged.
+6. Tune slur thresholds with recorded normal vs. slurred clips (a WAV replay
+   harness is the next testing addition).

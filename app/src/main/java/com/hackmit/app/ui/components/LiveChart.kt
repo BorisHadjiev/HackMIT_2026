@@ -16,19 +16,33 @@ fun LiveChart(
     values: List<Float>,
     modifier: Modifier = Modifier,
     lineColor: Color = MaterialTheme.colorScheme.primary,
+    secondary: List<Float> = emptyList(),
+    secondaryColor: Color = MaterialTheme.colorScheme.tertiary,
+    tertiary: List<Float> = emptyList(),
+    tertiaryColor: Color = MaterialTheme.colorScheme.secondary,
 ) {
     Canvas(modifier = modifier) {
-        if (values.size < 2) return@Canvas
-        val maxV = (values.maxOrNull() ?: 1f)
-        val minV = values.minOrNull() ?: 0f
+        val series = listOf(
+            values to lineColor,
+            secondary to secondaryColor,
+            tertiary to tertiaryColor,
+        ).filter { it.first.size >= 2 }
+        if (series.isEmpty()) return@Canvas
+
+        val all = series.flatMap { it.first }
+        val maxV = all.maxOrNull() ?: 1f
+        val minV = all.minOrNull() ?: 0f
         val range = (maxV - minV).coerceAtLeast(0.001f)
-        val stepX = size.width / (values.size - 1)
-        val path = Path()
-        values.forEachIndexed { i, v ->
-            val x = i * stepX
-            val y = size.height - ((v - minV) / range) * size.height
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+
+        series.forEach { (points, color) ->
+            val stepX = size.width / (points.size - 1)
+            val path = Path()
+            points.forEachIndexed { i, v ->
+                val x = i * stepX
+                val y = size.height - ((v - minV) / range) * size.height
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, color, style = Stroke(width = 4f))
         }
-        drawPath(path, lineColor, style = Stroke(width = 4f))
     }
 }

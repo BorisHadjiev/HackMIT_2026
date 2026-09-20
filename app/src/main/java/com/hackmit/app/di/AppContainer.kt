@@ -19,7 +19,7 @@ class AppContainer(context: Context) {
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val settingsStore: SettingsStore = SettingsStore(context)
-    val sensorRepository: SensorRepository = SensorRepository()
+    val sensorRepository: SensorRepository = SensorRepository(context.applicationContext)
     val scorer: StrokeRiskScorer = StrokeRiskScorer()
     val baselineStore: BaselineStore = BaselineStore(context)
     val alertManager: AlertManager = AlertManager(context, settingsStore, appScope)

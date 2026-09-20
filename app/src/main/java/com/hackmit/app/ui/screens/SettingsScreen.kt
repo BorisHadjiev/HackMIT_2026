@@ -16,6 +16,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,34 +26,119 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.hackmit.app.BuildConfig
 import com.hackmit.app.alert.AlertConfig
+import com.hackmit.app.sensor.ScannedBleDevice
 import com.hackmit.app.sensor.SensorTransport
+import com.hackmit.app.sensor.bleScanPermissions
+import com.hackmit.app.sensor.bluetoothEnabled
+import com.hackmit.app.sensor.scanForStrokeSense
+import com.hackmit.app.sensor.sensorTransportOf
 import com.hackmit.app.ui.AssessmentViewModel
+import com.hackmit.app.ui.components.ConnectionStatusBanner
 import com.hackmit.app.ui.components.InfoRow
 import com.hackmit.app.ui.components.ScreenScaffold
+import com.hackmit.app.ui.components.SleepHoursEditor
+import com.hackmit.app.ui.components.rememberPermissionsState
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * Finds the UNO Q without system pairing. A BLE-only GATT peripheral is invisible to
+ * Android's Bluetooth settings screen, so this in-app scan is the only reliable way
+ * for the user to discover the board.
+ */
+@Composable
+private fun BleBoardPicker(selected: String, onPick: (String) -> Unit) {
+    val context = LocalContext.current
+    val scanPermission = rememberPermissionsState(bleScanPermissions())
+    var scanning by remember { mutableStateOf(false) }
+    var devices by remember { mutableStateOf<List<ScannedBleDevice>>(emptyList()) }
+    var status by remember { mutableStateOf("") }
+
+    LaunchedEffect(scanning) {
+        if (!scanning) return@LaunchedEffect
+        devices = emptyList()
+        status = "Scanning…"
+        var problem: String? = null
+        withTimeoutOrNull(12_000) {
+            scanForStrokeSense(context).collect { update ->
+                devices = update.devices
+                problem = update.error
+                status = update.error
+                    ?: if (update.devices.isEmpty()) "Scanning…" else "Found ${update.devices.size}"
+            }
+        }
+        status = problem
+            ?: if (devices.isEmpty()) {
+                "No StrokeSense advertisement seen. Check the board is powered and python/main.py is running."
+            } else {
+                "Found ${devices.size} — tap to select"
+            }
+        scanning = false
+    }
+
+    when {
+        !scanPermission.granted -> {
+            Text(
+                "Bluetooth scan permission is required to find the board.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Button(onClick = scanPermission.request, modifier = Modifier.fillMaxWidth()) {
+                Text("Allow Bluetooth")
+            }
+        }
+
+        !bluetoothEnabled(context) -> Text(
+            "Turn Bluetooth on to scan for StrokeSense.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+
+        else -> {
+            Button(
+                onClick = { scanning = !scanning },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (scanning) "Stop scan" else "Scan for StrokeSense") }
+            if (status.isNotBlank()) {
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            devices.forEach { device ->
+                FilterChip(
+                    selected = selected.equals(device.address, ignoreCase = true),
+                    onClick = { onPick(device.address) },
+                    label = { Text("${device.name}  ${device.address}  ${device.rssi} dBm") },
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val scope = rememberCoroutineScope()
 
     val storedProxy by vm.settingsStore.deepgramProxyUrl.collectAsState(initial = "")
-    val storedMock by vm.settingsStore.mockSensors.collectAsState(initial = true)
     val storedMac by vm.settingsStore.sensorMac.collectAsState(initial = "")
+    val storedTransportName by vm.settingsStore.sensorTransport.collectAsState(initial = "MOCK")
     val storedContact by vm.settingsStore.emergencyContact.collectAsState(initial = "")
     val storedSms by vm.settingsStore.alertSmsEnabled.collectAsState(initial = false)
     val cfg by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
 
     var proxyInput by remember(storedProxy) { mutableStateOf(storedProxy) }
-    var mock by remember(storedMock) { mutableStateOf(storedMock) }
     var address by remember(storedMac) { mutableStateOf(storedMac) }
     var contact by remember(storedContact) { mutableStateOf(storedContact) }
     var sms by remember(storedSms) { mutableStateOf(storedSms) }
-    var transport by remember { mutableStateOf(SensorTransport.MOCK) }
+    var transport by remember(storedTransportName) { mutableStateOf(sensorTransportOf(storedTransportName)) }
     var gatewayUrl by remember(cfg) { mutableStateOf(cfg.gatewayUrl) }
     var gatewayToken by remember(cfg) { mutableStateOf(cfg.gatewayToken) }
     var contactName by remember(cfg) { mutableStateOf(cfg.trustedContactName) }
@@ -251,50 +337,65 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                 }
             }
 
-            // Sensor source
+            // Sensor source — one exclusive choice. Mock and BLE must never both look selected.
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Sensor source", style = MaterialTheme.typography.titleMedium)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Use mock sensors")
-                        Switch(
-                            checked = mock,
-                            onCheckedChange = {
-                                mock = it
-                                scope.launch { vm.settingsStore.setMockSensors(it) }
+                    Text("Arduino IMU", style = MaterialTheme.typography.titleMedium)
+                    ConnectionStatusBanner(stage = vm.sensorStage, address = vm.sensorAddress)
+                    Text(
+                        "Pick one source. Mock is demo data. Uno Q is the real board " +
+                            "(StrokeSense over BLE — it will not appear in Android Bluetooth " +
+                            "settings). Scan or paste the MAC, then Connect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = transport == SensorTransport.MOCK,
+                            onClick = {
+                                transport = SensorTransport.MOCK
+                                vm.chooseMock()
                             },
+                            label = { Text("Mock data") },
+                        )
+                        FilterChip(
+                            selected = transport == SensorTransport.BLE,
+                            onClick = {
+                                transport = SensorTransport.BLE
+                                vm.chooseBle(address)
+                            },
+                            label = { Text("Uno Q BLE") },
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SensorTransport.entries.forEach { option ->
-                            FilterChip(
-                                selected = transport == option,
-                                onClick = { transport = option },
-                                label = { Text(option.name) },
-                            )
-                        }
+                    if (transport == SensorTransport.BLE) {
+                        BleBoardPicker(
+                            selected = address,
+                            onPick = {
+                                address = it
+                                vm.chooseBle(it)
+                            },
+                        )
+                        OutlinedTextField(
+                            value = address,
+                            onValueChange = { address = it },
+                            label = { Text("Board MAC") },
+                            placeholder = { Text("14:B5:CD:F3:98:71") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Button(
+                            onClick = {
+                                scope.launch { vm.applySensorSource(SensorTransport.BLE, address) }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Connect to board") }
+                        OutlinedButton(
+                            enabled = vm.sensorLinkActive,
+                            onClick = { vm.disconnectSensor() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Disconnect") }
                     }
-                    OutlinedTextField(
-                        value = address,
-                        onValueChange = { address = it },
-                        label = { Text("MAC / endpoint") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                vm.settingsStore.setSensorMac(address)
-                                vm.settingsStore.setSensorTransport(transport.name)
-                            }
-                            vm.sensorRepository.select(transport, address)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Apply sensor source") }
+                    SleepHoursEditor(vm)
                 }
             }
 

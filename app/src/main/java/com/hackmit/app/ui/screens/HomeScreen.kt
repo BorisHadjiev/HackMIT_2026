@@ -67,7 +67,7 @@ fun HomeScreen(vm: AssessmentViewModel, nav: NavController) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                MockBadge()
+                if (vm.sensorRepository.isMock) MockBadge()
             }
 
             Spacer(Modifier.padding(top = 4.dp))
@@ -88,7 +88,7 @@ fun HomeScreen(vm: AssessmentViewModel, nav: NavController) {
             )
             ModuleCard(
                 title = "Motor / balance",
-                subtitle = "Arduino IMU drift + tremor",
+                subtitle = "Arduino IMU left / right / difference",
                 score = vm.results[ModuleType.MOTOR]?.score,
                 icon = Icons.Filled.Sensors,
                 onClick = { nav.navigate(Routes.MOTOR_CALIB) },

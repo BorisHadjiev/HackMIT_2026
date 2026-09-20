@@ -14,10 +14,12 @@ class LinqError(Exception):
 
 
 class LinqClient:
-    """Thin wrapper around the Linq Partner API v2 chat endpoint.
+    """Thin wrapper around the Linq Partner API v3 chat endpoint.
 
     Sending to a phone number creates (or reuses) a 1:1 chat and posts the
-    message in a single call.
+    message in a single call:
+      POST /v3/chats
+      { "from": "...", "to": ["+1..."], "message": { "parts": [ { "type": "text", "value": ... } ] } }
     """
 
     def __init__(self, client: httpx.AsyncClient, settings: Settings) -> None:
@@ -26,15 +28,18 @@ class LinqClient:
 
     async def send(self, text: str, phone: str, idempotency_key: str) -> str:
         payload = {
-            "send_from": self._settings.linq_from_number,
-            "chat": {"phone_numbers": [phone]},
-            "message": {"text": text, "idempotency_key": idempotency_key},
+            "from": self._settings.linq_from_number,
+            "to": [phone],
+            "message": {
+                "parts": [{"type": "text", "value": text}],
+                "idempotency_key": idempotency_key,
+            },
         }
         try:
             response = await self._client.post(
-                f"{self._settings.linq_base_url}/api/partner/v2/chats",
+                f"{self._settings.linq_base_url}/v3/chats",
                 headers={
-                    "X-LINQ-INTEGRATION-TOKEN": self._settings.linq_api_token,
+                    "Authorization": f"Bearer {self._settings.linq_api_token}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -47,11 +52,31 @@ class LinqClient:
             log.warning("linq send failed: status=%s body=%s", response.status_code, response.text[:200])
             raise LinqError(f"linq returned {response.status_code}")
 
-        data = response.json().get("data", {}) or {}
-        chat_id = data.get("id")
-        message = data.get("chat_messages") or {}
+        body = response.json() or {}
+        chat = body.get("chat") or {}
+        message = body.get("message") or {}
+        chat_id = chat.get("id") or body.get("id")
         message_id = message.get("id")
+        if message_id is None and chat_id:
+            message_id = await self._latest_message_id(chat_id)
         return f"linq:{chat_id}:{message_id}"
+
+    async def _latest_message_id(self, chat_id: str) -> str | None:
+        """When a reused chat's create response omits the message, fetch the newest one."""
+        try:
+            response = await self._client.get(
+                f"{self._settings.linq_base_url}/v3/chats/{chat_id}/messages?limit=1",
+                headers={"Authorization": f"Bearer {self._settings.linq_api_token}"},
+            )
+            if response.status_code != 200:
+                return None
+            body = response.json() or {}
+            messages = body.get("messages") or body.get("data") or []
+            if isinstance(messages, list) and messages:
+                return messages[0].get("id")
+        except httpx.HTTPError:
+            return None
+        return None
 
     async def register_webhook(self, webhook_url: str) -> dict:
         """Creates a Linq webhook subscription pointing at our receiver."""

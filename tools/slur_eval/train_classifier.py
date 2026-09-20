@@ -118,7 +118,7 @@ def main() -> None:
 
         det_auc = detector_auc(rr, y, groups)
         h_auc, _, _ = cv(H, y, groups)
-        s_auc, _, _ = cv(S, y, groups)
+        s_auc, sy, sp = cv(S, y, groups)
         f_auc, fy, fp = cv(F, y, groups)
 
         report.write(f"## {ds} (speakers={len(set(groups))}, n={len(rr)})\n")
@@ -159,6 +159,26 @@ def main() -> None:
             "n": int(len(y)),
         }
         json.dump(model, open(os.path.join(HERE, f"slur_classifier_{ds}.json"), "w"), indent=2)
+
+        # SSL-only model for serving (no handcrafted/ASR needed), with a Youden
+        # operating threshold from the pooled speaker-disjoint predictions.
+        pipe2 = make_pipeline(StandardScaler(), LogisticRegression(max_iter=5000, class_weight="balanced"))
+        pipe2.fit(S, y)
+        sc2 = pipe2.named_steps["standardscaler"]
+        lr2 = pipe2.named_steps["logisticregression"]
+        fpr2, tpr2, thr2 = roc_curve(sy, sp)
+        youden = int(np.argmax(tpr2 - fpr2))
+        model2 = {
+            "mean": sc2.mean_.tolist(),
+            "std": sc2.scale_.tolist(),
+            "coef": lr2.coef_[0].tolist(),
+            "intercept": float(lr2.intercept_[0]),
+            "threshold": float(thr2[youden]),
+            "ssl_model": str(ssl["model"]),
+            "cv_auc": s_auc,
+            "n": int(len(y)),
+        }
+        json.dump(model2, open(os.path.join(HERE, f"slur_classifier_ssl_{ds}.json"), "w"), indent=2)
         report.write("\n")
 
     report.close()

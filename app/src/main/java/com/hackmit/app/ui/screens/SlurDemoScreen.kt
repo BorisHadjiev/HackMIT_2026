@@ -23,12 +23,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.hackmit.app.audio.DemoSpeech
 import com.hackmit.app.audio.DemoWindow
+import com.hackmit.app.audio.SlurServer
 import com.hackmit.app.domain.AlertLevel
 import com.hackmit.app.domain.BaselineProfile
 import com.hackmit.app.ui.components.InfoRow
@@ -51,6 +53,8 @@ fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavControlle
 
     var results by remember { mutableStateOf<List<DemoWindow>>(emptyList()) }
     var lastAsset by remember { mutableStateOf<String?>(null) }
+    var aiScore by remember { mutableStateOf<Float?>(null) }
+    var aiBusy by remember { mutableStateOf(false) }
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
     var nowIndex by remember { mutableStateOf(0) }
     var playing by remember { mutableStateOf(false) }
@@ -148,6 +152,17 @@ fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavControlle
             message = "$label: playing\u2026"
             startPlayback(asset)
             busy = false
+        }
+    }
+
+    fun analyzeServer() {
+        val asset = lastAsset ?: return
+        scope.launch {
+            aiBusy = true
+            aiScore = null
+            val wav = runCatching { context.assets.open(asset).readBytes() }.getOrNull()
+            aiScore = if (wav == null) null else SlurServer.analyze(vm.settingsStore, wav)
+            aiBusy = false
         }
     }
 
@@ -274,6 +289,19 @@ fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavControlle
                                 "This is what an acute slur pattern looks like vs. your baseline.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = severityColor(1f),
+                            )
+                        }
+                        OutlinedButton(
+                            enabled = lastAsset != null && !aiBusy,
+                            onClick = { analyzeServer() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (aiBusy) "Analyzing on gx10\u2026" else "Server AI score (WavLM)") }
+                        aiScore?.let { s ->
+                            InfoRow("AI score", "${(s * 100).toInt()}%")
+                            InfoRow(
+                                "AI verdict",
+                                if (s >= 0.9447f) "Slurred (detected)" else "Clear",
+                                valueColor = if (s >= 0.9447f) severityColor(1f) else Color(0xFF2E7D32),
                             )
                         }
                     }

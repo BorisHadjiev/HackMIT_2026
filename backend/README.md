@@ -32,6 +32,8 @@ never sees the Linq token. It only knows the gateway URL and a shared
 | `POST` | `/v1/tts` | Local TTS (Kokoro, fallback Piper) → WAV |
 | `POST` | `/v1/agent` | Local voice agent (Ollama) Q&A |
 | `POST` | `/v1/speaker/enroll` | Enroll the user's voice for gating (raw PCM/WAV) |
+| `POST` | `/v1/face/analyze` | Server-side face asymmetry (MediaPipe + LR) |
+| `POST` | `/v1/slur/analyze` | Server-side slur score (WavLM embedding + LR) |
 | `GET` | `/v1/speaker/status` | Gating status + enrollment state |
 
 ### Voice (TTS + agent)

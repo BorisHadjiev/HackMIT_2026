@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     face_model_path: str = "models/face/face_landmarker.task"
     face_lr_path: str = "models/face/lr_model.json"
 
+    # Server-side slur classification (WavLM embedding + SSL-only LR).
+    slur_model_path: str = "models/slur/slur_classifier_ssl_pathological.json"
+
     bind: str = "127.0.0.1:8000"
     rate_limit_per_minute: int = 30
     max_body_bytes: int = 16384

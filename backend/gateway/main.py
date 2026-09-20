@@ -632,7 +632,7 @@ async def agent_stream(websocket: WebSocket) -> None:
         return
 
     context: dict = {}
-    for key in ("p_stroke", "severity", "action", "onset_minutes"):
+    for key in ("p_stroke", "severity", "action", "onset_minutes", "location"):
         val = websocket.query_params.get(key)
         if val not in (None, ""):
             context[key] = val

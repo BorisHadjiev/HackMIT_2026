@@ -13,10 +13,13 @@ SAMPLE_RATE = 16000
 
 
 def format_context(context: dict | None) -> str:
-    """Turn the caller's live screening snapshot into one prompt sentence."""
+    """Turn the caller's live screening snapshot into one report sentence."""
     if not context:
         return ""
     bits: list[str] = []
+    location = context.get("location")
+    if location:
+        bits.append(f"location {location}")
     if context.get("p_stroke") is not None:
         try:
             bits.append(f"stroke likelihood {round(float(context['p_stroke']) * 100)}%")
@@ -40,14 +43,11 @@ def format_context(context: dict | None) -> str:
             pass
     if not bits:
         return ""
-    return "Caller screening context (from StrokeSense, not a diagnosis): " + "; ".join(bits) + "."
+    return "StrokeSense automated alert: " + "; ".join(bits) + ". (Screening aid, not a diagnosis.)"
 
 
 def build_settings(settings: Settings, context: dict | None = None) -> dict:
-    prompt = settings.agent_prompt
-    ctx = format_context(context)
-    if ctx:
-        prompt = f"{prompt}\n\n{ctx}"
+    report = format_context(context)
 
     think: dict = {
         "provider": {"type": "open_ai", "model": settings.agent_llm_model, "temperature": 0.4},
@@ -59,31 +59,37 @@ def build_settings(settings: Settings, context: dict | None = None) -> dict:
             "headers": {"authorization": f"Bearer {settings.agent_llm_secret}"},
         }
 
+    agent: dict = {
+        "greeting": settings.agent_greeting,
+        "listen": {
+            "provider": {
+                "type": "deepgram",
+                "model": settings.agent_listen_model,
+                "language": "en",
+                "smart_format": True,
+                "keyterms": ["stroke", "face drooping", "slurred speech", "ambulance"],
+            }
+        },
+        "think": think,
+        "speak": {
+            "provider": {
+                "type": "deepgram",
+                "version": "v1",
+                "model": settings.agent_voice,
+                "speed": 1.0,
+            }
+        },
+    }
+    if report:
+        # Seed the conversation as the automated caller's first (already spoken) message,
+        # so the dispatcher has the symptoms + location from the start.
+        agent["context"] = {"messages": [{"type": "History", "role": "user", "content": report}]}
+
     return {
         "type": "Settings",
         "audio": {
             "input": {"encoding": "linear16", "sample_rate": SAMPLE_RATE},
             "output": {"encoding": "linear16", "sample_rate": SAMPLE_RATE, "container": "none"},
         },
-        "agent": {
-            "greeting": settings.agent_greeting,
-            "listen": {
-                "provider": {
-                    "type": "deepgram",
-                    "model": settings.agent_listen_model,
-                    "language": "en",
-                    "smart_format": True,
-                    "keyterms": ["stroke", "face drooping", "slurred speech", "ambulance"],
-                }
-            },
-            "think": think,
-            "speak": {
-                "provider": {
-                    "type": "deepgram",
-                    "version": "v1",
-                    "model": settings.agent_voice,
-                    "speed": 1.0,
-                }
-            },
-        },
+        "agent": agent,
     }

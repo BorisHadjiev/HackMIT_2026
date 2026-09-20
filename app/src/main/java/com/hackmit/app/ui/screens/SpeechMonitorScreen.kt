@@ -9,11 +9,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -28,8 +30,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.navigation.NavController
 import com.hackmit.app.audio.AudioCapture
+import com.hackmit.app.audio.RiskResult
+import com.hackmit.app.audio.RiskServer
 import com.hackmit.app.audio.SlurServer
 import com.hackmit.app.audio.Speaker
 import com.hackmit.app.audio.Wav
@@ -71,6 +76,11 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
     var aiTestScore by remember { mutableStateOf<Float?>(null) }
     var aiTestMessage by remember { mutableStateOf<String?>(null) }
     var aiTestMode by remember { mutableStateOf<String?>(null) }
+    var riskBusy by remember { mutableStateOf(false) }
+    var riskResult by remember { mutableStateOf<RiskResult?>(null) }
+    var riskMessage by remember { mutableStateOf<String?>(null) }
+    var onsetMinutes by remember { mutableStateOf("") }
+    var abruptStart by remember { mutableStateOf(true) }
 
     ScreenScaffold(title = "Continuous monitoring", onBack = { nav.popBackStack() }) { padding ->
         Column(
@@ -263,6 +273,81 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                     }
                     aiTestMessage?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Risk check", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Runs the server decision layer on the current speech score plus your " +
+                            "context. Always confirm with a doctor — this is not a diagnosis.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = onsetMinutes,
+                        onValueChange = { onsetMinutes = it.filter(Char::isDigit).take(4) },
+                        label = { Text("Minutes since symptoms started") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Symptoms started suddenly")
+                        Switch(checked = abruptStart, onCheckedChange = { abruptStart = it })
+                    }
+                    Button(
+                        enabled = !riskBusy,
+                        onClick = {
+                            scope.launch {
+                                riskBusy = true
+                                riskMessage = null
+                                riskResult = null
+                                val outcome = when (state.level) {
+                                    AlertLevel.ALERT, AlertLevel.WARNING -> "abnormal"
+                                    else -> "normal"
+                                }
+                                val score = state.aiScore ?: state.score
+                                val modules = mapOf(
+                                    "speech" to Triple(score, outcome, 0.9f),
+                                )
+                                val onset = onsetMinutes.toIntOrNull()
+                                riskResult = RiskServer.assess(
+                                    vm.settingsStore, modules, onset, abruptStart,
+                                )
+                                if (riskResult == null) riskMessage = "Could not reach the risk server."
+                                riskBusy = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (riskBusy) "Running risk check\u2026" else "Run risk check")
+                    }
+                    riskResult?.let { rr ->
+                        val color = if (rr.action == "CALL_911") severityColor(1f) else Color(0xFF2E7D32)
+                        InfoRow("Action", rr.action, valueColor = color)
+                        InfoRow("Stroke likelihood", "${(rr.pStroke * 100).toInt()}%")
+                        InfoRow("Severity", "${(rr.severity * 100).toInt()}%")
+                        if (rr.timeCritical) {
+                            Text(
+                                "Within the 4.5 h thrombolysis window — act fast.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = severityColor(1f),
+                            )
+                        }
+                        rr.rationale.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    }
+                    riskMessage?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                 }
             }

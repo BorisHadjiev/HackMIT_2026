@@ -1,0 +1,6 @@
+# ML dependencies for the slur (WavLM) + face (MediaPipe) serving on gx10.
+# Loaded lazily at runtime; keep in a separate file so the core gateway deps stay light.
+torch>=2.3
+transformers>=4.44
+torchaudio>=2.3
+mediapipe>=0.10

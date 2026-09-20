@@ -266,6 +266,11 @@ class SpeechMonitor(
                             Log.d(TAG, "ai score: %.2f".format(score))
                         }
                     }
+                } else if (_state.value.aiScore != null) {
+                    // No recent audible speech: drop the stale (possibly high) score
+                    // instead of freezing it, so the monitor recovers quickly.
+                    _state.value = _state.value.copy(aiScore = null)
+                    Log.d(TAG, "ai score cleared (silence)")
                 }
             }
         }
@@ -274,9 +279,17 @@ class SpeechMonitor(
     private fun recentHasEnergy(): Boolean {
         val snapshot = synchronized(recentPcm) { recentPcm.toList() }
         if (recentBytes < 16_000) return false // need >= 0.5 s
+        // Check only the most recent ~1 s so the score clears quickly after speech ends.
+        var tailBytes = 0
+        val tail = ArrayDeque<ByteArray>()
+        for (chunk in snapshot.asReversed()) {
+            if (tailBytes >= 16_000) break
+            tail.addFirst(chunk)
+            tailBytes += chunk.size
+        }
         var sum = 0.0
         var n = 0
-        for (chunk in snapshot) {
+        for (chunk in tail) {
             var i = 0
             while (i + 1 < chunk.size) {
                 val s = (((chunk[i + 1].toInt() and 0xFF) shl 8) or (chunk[i].toInt() and 0xFF)).toShort().toInt()

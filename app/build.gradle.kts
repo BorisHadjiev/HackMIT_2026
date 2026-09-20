@@ -26,6 +26,23 @@ val deepgramProxyUrl: String = runCatching {
     providers.gradleProperty("DEEPGRAM_PROXY_URL").getOrElse("")
 }
 
+// Backend gateway (voice, transcription proxy, care alerts). The shared demo token
+// lives in the gitignored local.properties so it is never committed.
+val gatewayBaseUrl: String = runCatching {
+    Properties().apply {
+        rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }.getProperty("GATEWAY_BASE_URL").orEmpty()
+}.getOrDefault("").ifBlank {
+    providers.gradleProperty("GATEWAY_BASE_URL").getOrElse("")
+}
+val gatewayToken: String = runCatching {
+    Properties().apply {
+        rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+    }.getProperty("GATEWAY_TOKEN").orEmpty()
+}.getOrDefault("").ifBlank {
+    providers.gradleProperty("GATEWAY_TOKEN").getOrElse("")
+}
+
 android {
     namespace = "com.hackmit.app"
     compileSdk = 35
@@ -42,6 +59,8 @@ android {
         resValue("string", "app_name", appName)
         buildConfigField("String", "DEEPGRAM_API_KEY", "\"$deepgramKey\"")
         buildConfigField("String", "DEEPGRAM_PROXY_URL", "\"$deepgramProxyUrl\"")
+        buildConfigField("String", "GATEWAY_BASE_URL", "\"$gatewayBaseUrl\"")
+        buildConfigField("String", "GATEWAY_TOKEN", "\"$gatewayToken\"")
     }
 
     buildTypes {

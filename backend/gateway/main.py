@@ -326,6 +326,23 @@ async def speaker_status(request: Request, x_alert_gateway_token: str | None = H
     }
 
 
+@app.get("/v1/linq/status")
+async def linq_status(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
+    settings: Settings = request.app.state.settings
+    _authorize(settings, x_alert_gateway_token)
+    try:
+        numbers = await request.app.state.linq.phone_numbers()
+    except LinqError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    phone_list = [n.get("phone_number") for n in numbers.get("phone_numbers", [])]
+    return {
+        "configured": settings.linq_configured,
+        "send_from": settings.linq_from_number,
+        "provisioned": phone_list,
+        "send_from_ok": settings.linq_from_number in phone_list,
+    }
+
+
 @app.websocket("/v1/deepgram/stream")
 async def deepgram_proxy(websocket: WebSocket) -> None:
     settings: Settings = websocket.app.state.settings

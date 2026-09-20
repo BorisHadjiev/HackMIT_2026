@@ -43,8 +43,10 @@ class SettingsStore(private val context: Context) {
     val sensorTransport: Flow<String> = context.dataStore.data.map { it[keyTransport] ?: "MOCK" }
     val alertConfig: Flow<AlertConfig> = context.dataStore.data.map {
         AlertConfig(
-            gatewayUrl = it[keyAlertGateway].orEmpty(),
-            gatewayToken = it[keyAlertGatewayToken].orEmpty(),
+            gatewayUrl = it[keyAlertGateway]?.takeIf(String::isNotBlank)
+                ?: BuildConfig.GATEWAY_BASE_URL.trimEnd('/') + "/v1/stroke-alerts",
+            gatewayToken = it[keyAlertGatewayToken]?.takeIf(String::isNotBlank)
+                ?: BuildConfig.GATEWAY_TOKEN,
             trustedContactName = it[keyTrustedContactName].orEmpty(),
             trustedContactPhone = it[keyTrustedContactPhone].orEmpty(),
             emergencyNumber = it[keyEmergencyNumber]?.takeIf(String::isNotBlank) ?: "911",

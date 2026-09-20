@@ -152,7 +152,12 @@ fun DisclaimerCard(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun InfoRow(label: String, value: String, modifier: Modifier = Modifier) {
+fun InfoRow(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -162,6 +167,6 @@ fun InfoRow(label: String, value: String, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = valueColor)
     }
 }

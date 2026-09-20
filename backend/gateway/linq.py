@@ -76,3 +76,13 @@ class LinqClient:
                 f"linq webhook registration returned {response.status_code}: {response.text[:200]}"
             )
         return response.json()
+
+    async def phone_numbers(self) -> dict:
+        """Lists the phone numbers provisioned to the integration token's org."""
+        response = await self._client.get(
+            f"{self._settings.linq_base_url}/api/partner/v2/phone_numbers",
+            headers={"X-LINQ-INTEGRATION-TOKEN": self._settings.linq_api_token},
+        )
+        if response.status_code != 200:
+            raise LinqError(f"linq phone_numbers returned {response.status_code}: {response.text[:200]}")
+        return response.json()

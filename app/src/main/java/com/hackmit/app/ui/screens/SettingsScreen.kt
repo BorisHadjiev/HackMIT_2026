@@ -11,6 +11,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -23,6 +24,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -38,30 +40,26 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
     val scope = rememberCoroutineScope()
 
-    val storedKey by vm.settingsStore.deepgramKey.collectAsState(initial = "")
     val storedProxy by vm.settingsStore.deepgramProxyUrl.collectAsState(initial = "")
     val storedMock by vm.settingsStore.mockSensors.collectAsState(initial = true)
     val storedMac by vm.settingsStore.sensorMac.collectAsState(initial = "")
     val storedContact by vm.settingsStore.emergencyContact.collectAsState(initial = "")
     val storedSms by vm.settingsStore.alertSmsEnabled.collectAsState(initial = false)
-    val storedAlertConfig by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
+    val cfg by vm.settingsStore.alertConfig.collectAsState(initial = AlertConfig())
 
-    var keyInput by remember(storedKey) { mutableStateOf(storedKey) }
     var proxyInput by remember(storedProxy) { mutableStateOf(storedProxy) }
     var mock by remember(storedMock) { mutableStateOf(storedMock) }
     var address by remember(storedMac) { mutableStateOf(storedMac) }
     var contact by remember(storedContact) { mutableStateOf(storedContact) }
     var sms by remember(storedSms) { mutableStateOf(storedSms) }
     var transport by remember { mutableStateOf(SensorTransport.MOCK) }
-    var gatewayUrl by remember(storedAlertConfig) { mutableStateOf(storedAlertConfig.gatewayUrl) }
-    var gatewayToken by remember(storedAlertConfig) { mutableStateOf(storedAlertConfig.gatewayToken) }
-    var trustedContactName by remember(storedAlertConfig) {
-        mutableStateOf(storedAlertConfig.trustedContactName)
-    }
-    var trustedContactPhone by remember(storedAlertConfig) {
-        mutableStateOf(storedAlertConfig.trustedContactPhone)
-    }
-    var emergencyNumber by remember(storedAlertConfig) { mutableStateOf(storedAlertConfig.emergencyNumber) }
+    var gatewayUrl by remember(cfg) { mutableStateOf(cfg.gatewayUrl) }
+    var gatewayToken by remember(cfg) { mutableStateOf(cfg.gatewayToken) }
+    var contactName by remember(cfg) { mutableStateOf(cfg.trustedContactName) }
+    var contactPhone by remember(cfg) { mutableStateOf(cfg.trustedContactPhone) }
+    var emergencyNumber by remember(cfg) { mutableStateOf(cfg.emergencyNumber) }
+
+    val gatewayReady = cfg.gatewayUrl.isNotBlank() && cfg.gatewayToken.isNotBlank()
 
     ScreenScaffold(title = "Settings", onBack = { nav.popBackStack() }) { padding ->
         Column(
@@ -71,80 +69,78 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Status
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text("Deepgram", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = keyInput,
-                        onValueChange = { keyInput = it },
-                        label = { Text("API key (direct mode)") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Status", style = MaterialTheme.typography.titleMedium)
+                    InfoRow(
+                        "Voice & alerts",
+                        if (gatewayReady) "Ready" else "Gateway not configured",
+                        valueColor = if (gatewayReady) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
                     )
-                    OutlinedTextField(
-                        value = proxyInput,
-                        onValueChange = { proxyInput = it },
-                        label = { Text("Proxy URL (backend)") },
-                        placeholder = { Text("wss://host/v1/deepgram/stream") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                vm.settingsStore.setDeepgramKey(keyInput)
-                                vm.settingsStore.setDeepgramProxyUrl(proxyInput)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Save")
-                    }
+                    InfoRow("Backend", cfg.gatewayUrl.ifBlank { "—" })
+                    InfoRow("Gateway token", if (cfg.gatewayToken.isNotBlank()) "Configured" else "Missing")
                     Text(
-                        "Set a proxy URL (plus a gateway token in Care alerts) to stream audio " +
-                            "through the backend so the Deepgram key never ships in the APK.",
+                        "Everything — spoken instructions, the Deepgram proxy, speaker gating, " +
+                            "personalized results, and care alerts — runs through this one backend. " +
+                            "It is pre-configured for this demo.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
+            // Backend gateway
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text("Care alerts (Linq)", style = MaterialTheme.typography.titleMedium)
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Backend gateway", style = MaterialTheme.typography.titleMedium)
                     OutlinedTextField(
                         value = gatewayUrl,
                         onValueChange = { gatewayUrl = it },
-                        label = { Text("Alert gateway URL") },
-                        placeholder = { Text("https://api.example.com/v1/stroke-alerts") },
+                        label = { Text("Gateway URL") },
+                        placeholder = { Text(BuildConfig.GATEWAY_BASE_URL.ifBlank { "https://host" }) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         value = gatewayToken,
                         onValueChange = { gatewayToken = it },
-                        label = { Text("Alert gateway token (demo only)") },
+                        label = { Text("Gateway token") },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    Button(
+                        onClick = {
+                            scope.launch { vm.settingsStore.setAlertConfig(cfg.copy(gatewayUrl = gatewayUrl, gatewayToken = gatewayToken)) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Save gateway") }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch { vm.settingsStore.setAlertConfig(cfg.copy(gatewayUrl = "", gatewayToken = "")) }
+                            gatewayUrl = cfg.gatewayUrl
+                            gatewayToken = cfg.gatewayToken
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Reset to demo defaults") }
+                }
+            }
+
+            // Care alerts (Linq)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Care alerts", style = MaterialTheme.typography.titleMedium)
                     OutlinedTextField(
-                        value = trustedContactName,
-                        onValueChange = { trustedContactName = it },
+                        value = contactName,
+                        onValueChange = { contactName = it },
                         label = { Text("Trusted contact name") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
-                        value = trustedContactPhone,
-                        onValueChange = { trustedContactPhone = it },
+                        value = contactPhone,
+                        onValueChange = { contactPhone = it },
                         label = { Text("Trusted contact phone (E.164)") },
                         placeholder = { Text("+15551234567") },
                         singleLine = true,
@@ -161,35 +157,103 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                         onClick = {
                             scope.launch {
                                 vm.settingsStore.setAlertConfig(
-                                    AlertConfig(
-                                        gatewayUrl = gatewayUrl,
-                                        gatewayToken = gatewayToken,
-                                        trustedContactName = trustedContactName,
-                                        trustedContactPhone = trustedContactPhone,
+                                    cfg.copy(
+                                        trustedContactName = contactName,
+                                        trustedContactPhone = contactPhone,
                                         emergencyNumber = emergencyNumber,
                                     ),
                                 )
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Save alert settings")
-                    }
+                    ) { Text("Save contact") }
                     Text(
-                        "The app sends only a short screening summary to your gateway. " +
-                            "Keep the Linq integration token on that server, not on this phone. " +
-                            "A gateway token is only for the local demo.",
+                        "A short screening summary is sent to this contact on request. The Linq " +
+                            "integration token stays on the backend.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
+            // Emergency SMS (monitoring)
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Emergency SMS", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = contact,
+                        onValueChange = { contact = it },
+                        label = { Text("Emergency contact number") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Text contact on alert")
+                        Switch(
+                            checked = sms,
+                            onCheckedChange = {
+                                sms = it
+                                scope.launch { vm.settingsStore.setAlertSmsEnabled(it) }
+                            },
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                vm.settingsStore.setEmergencyContact(contact)
+                                vm.settingsStore.setAlertSmsEnabled(sms)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Save SMS settings") }
+                    Text(
+                        "On a high-confidence alert you get a 15s window to cancel before the text is sent.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // Speech transcription
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Speech transcription", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Audio streams through the backend proxy by default (Deepgram key stays " +
+                            "on the server). These are only for advanced overrides.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = proxyInput,
+                        onValueChange = { proxyInput = it },
+                        label = { Text("Deepgram proxy URL") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = "",
+                        onValueChange = {},
+                        label = { Text("Deepgram API key (direct mode only)") },
+                        enabled = false,
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Button(
+                        onClick = { scope.launch { vm.settingsStore.setDeepgramProxyUrl(proxyInput) } },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Save transcription settings") }
+                }
+            }
+
+            // Sensor source
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Sensor source", style = MaterialTheme.typography.titleMedium)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -230,67 +294,17 @@ fun SettingsScreen(vm: AssessmentViewModel, nav: NavController) {
                             vm.sensorRepository.select(transport, address)
                         },
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Apply sensor source")
-                    }
+                    ) { Text("Apply sensor source") }
                 }
             }
 
+            // About
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("About", style = MaterialTheme.typography.titleMedium)
                     InfoRow("App", BuildConfig.APPLICATION_ID)
                     InfoRow("Version", BuildConfig.VERSION_NAME)
                     InfoRow("Build type", BuildConfig.BUILD_TYPE)
-                }
-            }
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Text("Emergency alerts", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = contact,
-                        onValueChange = { contact = it },
-                        label = { Text("Emergency contact number") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Text contact on alert")
-                        Switch(
-                            checked = sms,
-                            onCheckedChange = {
-                                sms = it
-                                scope.launch { vm.settingsStore.setAlertSmsEnabled(it) }
-                            },
-                        )
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                vm.settingsStore.setEmergencyContact(contact)
-                                vm.settingsStore.setAlertSmsEnabled(sms)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Save alert settings")
-                    }
-                    Text(
-                        "On a high-confidence alert you get a 15s window to cancel before the text is sent.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }

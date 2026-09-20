@@ -317,9 +317,18 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                                     else -> "normal"
                                 }
                                 val score = state.aiScore ?: state.score
-                                val modules = mapOf(
+                                val modules = mutableMapOf(
                                     "speech" to Triple(score, outcome, 0.9f),
                                 )
+                                // Include the latest completed face/motor screens (if any).
+                                vm.results[com.hackmit.app.domain.ModuleType.FACE]?.let { r ->
+                                    val o = if (r.score >= 0.5535f) "abnormal" else "normal"
+                                    modules["face"] = Triple(r.score, o, 0.9f)
+                                }
+                                vm.results[com.hackmit.app.domain.ModuleType.MOTOR]?.let { r ->
+                                    val o = if (r.score >= 0.33f) "abnormal" else "normal"
+                                    modules["motor"] = Triple(r.score, o, 0.9f)
+                                }
                                 val onset = onsetMinutes.toIntOrNull()
                                 riskResult = RiskServer.assess(
                                     vm.settingsStore, modules, onset, abruptStart,

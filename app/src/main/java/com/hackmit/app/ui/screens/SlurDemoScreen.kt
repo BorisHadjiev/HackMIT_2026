@@ -66,7 +66,7 @@ fun SlurDemoScreen(vm: com.hackmit.app.ui.AssessmentViewModel, nav: NavControlle
 
     fun startPlayback(asset: String) {
         releasePlayer()
-        val bytes = runCatching { context.assets.open("audio/$asset").readBytes() }.getOrNull()
+        val bytes = runCatching { context.assets.open(asset).readBytes() }.getOrNull()
         if (bytes == null) {
             Log.e("SlurDemo", "could not read asset $asset")
             message = "Could not read audio."

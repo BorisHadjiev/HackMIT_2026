@@ -42,6 +42,7 @@ import com.hackmit.app.ui.components.ScoreBar
 import com.hackmit.app.ui.components.ScreenScaffold
 import com.hackmit.app.ui.components.SpeakButton
 import com.hackmit.app.ui.components.rememberPermissionState
+import com.hackmit.app.video.AsymmetryCalculator
 import com.hackmit.app.video.FaceFrame
 import com.hackmit.app.video.MediaPipeFaceAnalyzer
 import kotlinx.coroutines.delay
@@ -217,7 +218,7 @@ fun FaceTestScreen(vm: AssessmentViewModel, nav: NavController) {
                                 Metric("Baseline", "${(baseline * 100).toInt()}%", baseline),
                                 Metric("Change vs baseline", "%+d".format(((score - baseline) * 100).toInt()), (score - baseline).coerceIn(0f, 1f)),
                             ),
-                            summary = if (score >= 0.33f) {
+                            summary = if (score >= AsymmetryCalculator.LOGISTIC_THRESHOLD) {
                                 "Facial asymmetry detected"
                             } else {
                                 "Face appears symmetric"

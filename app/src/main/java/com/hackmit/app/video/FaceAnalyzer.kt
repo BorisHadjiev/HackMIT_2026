@@ -9,6 +9,7 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.sin
 
@@ -101,7 +102,8 @@ class MediaPipeFaceAnalyzer(context: Context, private val minConfidence: Float =
             arr[i * 2] = landmarks[i].x()
             arr[i * 2 + 1] = landmarks[i].y()
         }
-        return AsymmetryCalculator.faceFrame(arr)
+        val feats = AsymmetryCalculator.features(arr)
+        return FaceFrame(true, AsymmetryCalculator.logisticScore(arr), feats.mouthDroop, feats.eyeAsymmetry)
     }
 }
 
@@ -166,6 +168,26 @@ object AsymmetryCalculator {
      * as closed, so eyelid asymmetry is not assessed (avoids a noisy ratio on blinks).
      */
     private const val MIN_EYE_OPENING = 0.05f
+
+    // Logistic regression on the corrected geometry (mouth, eyelid, cheek, brow
+    // perpendicular offsets), trained on stroke + PalsyNet + face-stroke-tiny
+    // (StandardScaler + balanced LR). CV AUC 0.84; operating threshold 0.5535
+    // keeps healthy LFW false positives ~5% (see tools/face_eval/train_lr.py).
+    private const val LR_MEAN_MOUTH = 0.037833f
+    private const val LR_MEAN_EYE = 0.088274f
+    private const val LR_MEAN_CHEEK = 0.028482f
+    private const val LR_MEAN_BROW = 0.016724f
+    private const val LR_STD_MOUTH = 0.038300f
+    private const val LR_STD_EYE = 0.099723f
+    private const val LR_STD_CHEEK = 0.024988f
+    private const val LR_STD_BROW = 0.014048f
+    private const val LR_COEF_MOUTH = 1.753688f
+    private const val LR_COEF_EYE = 0.073174f
+    private const val LR_COEF_CHEEK = -0.323215f
+    private const val LR_COEF_BROW = -0.200029f
+    private const val LR_INTERCEPT = -0.019564f
+
+    const val LOGISTIC_THRESHOLD = 0.5535f
 
     data class Features(
         val asymmetry: Float,
@@ -232,6 +254,52 @@ object AsymmetryCalculator {
 
     /** Overall facial-asymmetry severity in [0, 1] (0 = symmetric). */
     fun asymmetryIndex(landmarks: FloatArray): Float = features(landmarks).asymmetry
+
+    /**
+     * Logistic-regression probability of a stroke-like droop in [0, 1], using the
+     * corrected geometry features that were trained/validated on gx10. Use
+     * [LOGISTIC_THRESHOLD] for the screening decision.
+     */
+    fun logisticScore(landmarks: FloatArray): Float {
+        if (landmarks.size < REQUIRED_LANDMARKS * 2) return 0f
+        val eyeLx = landmarks[EYE_LEFT_OUTER * 2]
+        val eyeLy = landmarks[EYE_LEFT_OUTER * 2 + 1]
+        val eyeRx = landmarks[EYE_RIGHT_OUTER * 2]
+        val eyeRy = landmarks[EYE_RIGHT_OUTER * 2 + 1]
+        val ex = eyeRx - eyeLx
+        val ey = eyeRy - eyeLy
+        val iod = hypot(ex, ey)
+        if (iod < 1e-4f) return 0f
+        val midX = (eyeLx + eyeRx) / 2f
+        val midY = (eyeLy + eyeRy) / 2f
+        val perpX = -ey / iod
+        val perpY = ex / iod
+        fun perp(index: Int): Float {
+            return ((landmarks[index * 2] - midX) * perpX +
+                (landmarks[index * 2 + 1] - midY) * perpY) / iod
+        }
+
+        val mouth = abs(perp(MOUTH_LEFT) - perp(MOUTH_RIGHT))
+        val cheek = abs(perp(CHEEK_LEFT) - perp(CHEEK_RIGHT))
+        val brow = abs(perp(BROW_LEFT) - perp(BROW_RIGHT))
+        val openL = hypot(
+            landmarks[LID_UPPER_LEFT * 2] - landmarks[LID_LOWER_LEFT * 2],
+            landmarks[LID_UPPER_LEFT * 2 + 1] - landmarks[LID_LOWER_LEFT * 2 + 1],
+        ) / iod
+        val openR = hypot(
+            landmarks[LID_UPPER_RIGHT * 2] - landmarks[LID_LOWER_RIGHT * 2],
+            landmarks[LID_UPPER_RIGHT * 2 + 1] - landmarks[LID_LOWER_RIGHT * 2 + 1],
+        ) / iod
+        val eyeOpenAsym = if (openL + openR > 0f) abs(openL - openR) / (openL + openR) else 0f
+
+        val zMouth = (mouth - LR_MEAN_MOUTH) / LR_STD_MOUTH
+        val zEye = (eyeOpenAsym - LR_MEAN_EYE) / LR_STD_EYE
+        val zCheek = (cheek - LR_MEAN_CHEEK) / LR_STD_CHEEK
+        val zBrow = (brow - LR_MEAN_BROW) / LR_STD_BROW
+        val logit = LR_COEF_MOUTH * zMouth + LR_COEF_EYE * zEye +
+            LR_COEF_CHEEK * zCheek + LR_COEF_BROW * zBrow + LR_INTERCEPT
+        return (1f / (1f + exp(-logit))).coerceIn(0f, 1f)
+    }
 
     /** Mouth-corner droop asymmetry relative to the eye line, as [0, 1] severity. */
     fun mouthDroop(landmarks: FloatArray): Float = features(landmarks).mouthDroop

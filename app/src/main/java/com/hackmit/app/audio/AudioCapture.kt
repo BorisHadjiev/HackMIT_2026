@@ -4,14 +4,24 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.util.Log
 
 /**
  * Captures 16 kHz mono linear16 PCM suitable for Deepgram.
  * Caller is responsible for the RECORD_AUDIO runtime permission.
+ *
+ * For full-duplex calls, pass [source] = VOICE_COMMUNICATION and [echoCancel] = true
+ * so the platform echo canceller removes the agent's own speaker output.
  */
-class AudioCapture(private val onChunk: (ByteArray) -> Unit) {
+class AudioCapture(
+    private val source: Int = MediaRecorder.AudioSource.VOICE_RECOGNITION,
+    private val echoCancel: Boolean = false,
+    private val onChunk: (ByteArray) -> Unit,
+) {
 
     private var record: AudioRecord? = null
+    private var aec: AcousticEchoCanceler? = null
 
     @Volatile
     private var running = false
@@ -26,7 +36,7 @@ class AudioCapture(private val onChunk: (ByteArray) -> Unit) {
         if (minBuffer <= 0) return false
 
         val recorder = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            source,
             SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -35,6 +45,10 @@ class AudioCapture(private val onChunk: (ByteArray) -> Unit) {
         if (recorder.state != AudioRecord.STATE_INITIALIZED) {
             recorder.release()
             return false
+        }
+        if (echoCancel && AcousticEchoCanceler.isAvailable()) {
+            aec = AcousticEchoCanceler.create(recorder.audioSessionId)?.also { it.enabled = true }
+            Log.d("AudioCapture", "AEC enabled=${aec?.enabled}")
         }
         record = recorder
         running = true
@@ -52,6 +66,11 @@ class AudioCapture(private val onChunk: (ByteArray) -> Unit) {
 
     fun stop() {
         running = false
+        try {
+            aec?.release()
+        } catch (_: Exception) {
+        }
+        aec = null
         try {
             record?.stop()
         } catch (_: Exception) {

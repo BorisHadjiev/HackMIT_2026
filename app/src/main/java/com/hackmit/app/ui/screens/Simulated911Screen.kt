@@ -1,6 +1,8 @@
 package com.hackmit.app.ui.screens
 
 import android.Manifest
+import android.media.AudioManager
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -47,8 +50,13 @@ import com.hackmit.app.ui.components.ScreenScaffold
 import com.hackmit.app.ui.components.rememberPermissionState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 private data class Line(val role: String, val text: String)
+
+/** How long after the agent's last audio frame we keep the mic muted (silence sent). */
+private const val AGENT_TAIL_MS = 700L
 
 /**
  * Simulated 911 call. The user is the caller; a Deepgram voice agent (BYO local LLM)
@@ -59,10 +67,18 @@ private data class Line(val role: String, val text: String)
 fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
     val scope = rememberCoroutineScope()
     val mic = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+    val context = LocalContext.current
+    val audioManager = remember { context.getSystemService(AudioManager::class.java) }
 
     val agent = remember { AgentStream(vm.settingsStore, scope) }
     var player by remember { mutableStateOf<PcmPlayer?>(null) }
     var capture by remember { mutableStateOf<AudioCapture?>(null) }
+
+    // Timestamp of the last agent audio frame. While the agent is speaking we send
+    // silence (not the mic) so it never hears itself; the stream stays alive.
+    val lastAgentAudioMs = remember { AtomicLong(0L) }
+    // Mic stays closed until the greeting has finished (first AgentAudioDone).
+    val greetingDone = remember { AtomicBoolean(false) }
 
     var active by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("Idle") }
@@ -75,6 +91,10 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
         capture?.stop(); capture = null
         agent.stop()
         player?.stop(); player = null
+        runCatching {
+            audioManager?.mode = AudioManager.MODE_NORMAL
+            audioManager?.isSpeakerphoneOn = false
+        }
     }
 
     fun startCall() {
@@ -97,6 +117,13 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
         val p = PcmPlayer()
         p.start()
         player = p
+        // Route through the voice path so the platform echo canceller can work.
+        runCatching {
+            audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager?.isSpeakerphoneOn = true
+        }
+        lastAgentAudioMs.set(SystemClock.uptimeMillis())
+        greetingDone.set(false)
         active = true
         agent.start(
             context = context,
@@ -104,20 +131,42 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
                 when (e.type) {
                     "ConversationText" -> e.text?.let { lines.add(Line(e.role ?: "assistant", it)) }
                     "UserStartedSpeaking" -> player?.flush() // barge-in
+                    "AgentAudioDone" -> {
+                        lastAgentAudioMs.set(SystemClock.uptimeMillis())
+                        greetingDone.set(true)
+                    }
                     "Error" -> status = "Agent error"
                 }
             },
-            onAudio = { player?.write(it) },
+            onAudio = {
+                lastAgentAudioMs.set(SystemClock.uptimeMillis()) // agent is speaking
+                player?.write(it)
+            },
             onStatus = { status = it },
         )
-        val c = AudioCapture { bytes -> if (active) agent.send(bytes) }
+        val c = AudioCapture(
+            onChunk = { bytes ->
+                if (active) {
+                    // Send the mic only once the greeting is done and the agent is quiet;
+                    // otherwise send silence so the agent can't hear itself.
+                    val quiet = SystemClock.uptimeMillis() - lastAgentAudioMs.get() > AGENT_TAIL_MS
+                    val allowMic = greetingDone.get() && quiet
+                    agent.send(if (allowMic) bytes else ByteArray(bytes.size))
+                }
+            },
+            source = android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            echoCancel = true,
+        )
         if (!c.start()) status = "Microphone unavailable" else capture = c
     }
 
     LaunchedEffect(active) {
+        var t = 0
         while (active) {
             delay(1000)
+            t += 1
             seconds += 1
+            if (t >= 12) greetingDone.set(true) // safety if AgentAudioDone never arrives
         }
     }
 

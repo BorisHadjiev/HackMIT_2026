@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS webhook_events (
 
 CREATE INDEX IF NOT EXISTS idx_webhook_chat_msg
     ON webhook_events (linq_chat_id, linq_message_id);
+
+CREATE TABLE IF NOT EXISTS risk_assessments (
+    id            TEXT PRIMARY KEY,
+    created_at_ms INTEGER NOT NULL,
+    policy        TEXT NOT NULL,
+    input_json    TEXT NOT NULL,
+    output_json   TEXT NOT NULL,
+    outcome       TEXT,                -- feedback label: stroke | tia | mimic | none
+    outcome_at_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_created ON risk_assessments (created_at_ms);
 """
 
 
@@ -146,3 +158,27 @@ class Database:
         row = await cur.fetchone()
         await cur.close()
         return int(row[0]) if row else 0
+
+    async def record_risk(self, row: dict[str, Any]) -> None:
+        await self._conn.execute(  # type: ignore[union-attr]
+            """INSERT INTO risk_assessments
+               (id, created_at_ms, policy, input_json, output_json)
+               VALUES (?,?,?,?,?)""",
+            (
+                row["id"],
+                row["created_at_ms"],
+                row["policy"],
+                row["input_json"],
+                row["output_json"],
+            ),
+        )
+        await self._conn.commit()  # type: ignore[union-attr]
+
+    async def set_risk_outcome(self, risk_id: str, outcome: str) -> bool:
+        cur = await self._conn.execute(  # type: ignore[union-attr]
+            "UPDATE risk_assessments SET outcome = ?, outcome_at_ms = ? WHERE id = ?",
+            (outcome, int(time.time() * 1000), risk_id),
+        )
+        await self._conn.commit()  # type: ignore[union-attr]
+        await cur.close()
+        return cur.rowcount > 0

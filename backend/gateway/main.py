@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import time
+import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from typing import Deque
@@ -28,8 +29,11 @@ from .models import (
     AlertEnvelope,
     AlertResponse,
     HealthResponse,
+    RiskOutcomeRequest,
+    RiskRequest,
     TtsRequest,
 )
+from .risk import assess as risk_assess
 from .speaker import SpeakerGate, speech_segments
 from .slur import SlurServer
 from .tts import TtsEngine, TtsError, wav_bytes
@@ -372,6 +376,58 @@ async def slur_clear(request: Request, x_alert_gateway_token: str | None = Heade
     settings: Settings = request.app.state.settings
     _authorize(settings, x_alert_gateway_token)
     return await asyncio.to_thread(request.app.state.slur.clear)
+
+
+@app.post("/v1/risk/assess")
+async def risk_assess_endpoint(
+    req: RiskRequest,
+    request: Request,
+    x_alert_gateway_token: str | None = Header(default=None),
+) -> dict:
+    settings: Settings = request.app.state.settings
+    db: Database = request.app.state.db
+    _authorize(settings, x_alert_gateway_token)
+    _check_rate(settings, x_alert_gateway_token or "anonymous")
+
+    modules = {k: v.model_dump() for k, v in req.modules.items()}
+    context = req.context.model_dump()
+    result = risk_assess(modules, context, req.policy)
+
+    risk_id = str(uuid.uuid4())
+    await db.record_risk(
+        {
+            "id": risk_id,
+            "created_at_ms": int(time.time() * 1000),
+            "policy": req.policy,
+            "input_json": json.dumps({"modules": modules, "context": context}),
+            "output_json": json.dumps(result),
+        }
+    )
+    log.info(
+        "risk assess id=%s action=%s p=%.3f sev=%.2f signs=%s",
+        risk_id,
+        result["action"],
+        result["p_stroke"],
+        result["severity"],
+        result["signs"],
+    )
+    return {"risk_id": risk_id, **result}
+
+
+@app.post("/v1/risk/outcome")
+async def risk_outcome(
+    req: RiskOutcomeRequest,
+    request: Request,
+    x_alert_gateway_token: str | None = Header(default=None),
+) -> dict:
+    settings: Settings = request.app.state.settings
+    db: Database = request.app.state.db
+    _authorize(settings, x_alert_gateway_token)
+    ok = await db.set_risk_outcome(req.risk_id, req.outcome)
+    if not ok:
+        raise HTTPException(status_code=404, detail="risk assessment not found")
+    log.info("risk outcome %s -> %s", req.risk_id, req.outcome)
+    return {"status": "ok"}
 
 
 @app.get("/v1/linq/status")

@@ -60,3 +60,34 @@ class AgentRequest(BaseModel):
 class AgentResponse(BaseModel):
     answer: str
     model: str = ""
+
+
+ModuleOutcome = Literal["normal", "abnormal", "unable", "timeout", "error", "missing"]
+
+
+class ModuleResult(BaseModel):
+    score: float = Field(default=0.0, ge=0.0, le=1.0)
+    outcome: ModuleOutcome = "normal"
+    quality: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class RiskContext(BaseModel):
+    age: int | None = None
+    onset_minutes: int | None = Field(default=None, ge=0)
+    abrupt: bool = False
+    prior_stroke: bool = False
+    anticoagulant: bool = False
+    seizure: bool = False
+    blood_pressure: int | None = None
+    diabetes: bool = False
+
+
+class RiskRequest(BaseModel):
+    modules: dict[str, ModuleResult]
+    context: RiskContext = RiskContext()
+    policy: Literal["sensitive", "balanced"] = "sensitive"
+
+
+class RiskOutcomeRequest(BaseModel):
+    risk_id: str = Field(min_length=1, max_length=128)
+    outcome: Literal["stroke", "tia", "mimic", "none", "unknown"]

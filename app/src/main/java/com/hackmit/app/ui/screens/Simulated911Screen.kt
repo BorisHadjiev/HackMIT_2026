@@ -23,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -85,6 +86,7 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
     var seconds by remember { mutableIntStateOf(0) }
     var onset by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
+    var autoCaller by remember { mutableStateOf(true) }
     val lines = remember { mutableStateListOf<Line>() }
 
     fun endCall() {
@@ -129,6 +131,7 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
         active = true
         agent.start(
             context = context,
+            auto = autoCaller,
             onEvent = { e: AgentEvent ->
                 when (e.type) {
                     "ConversationText" -> e.text?.let { lines.add(Line(e.role ?: "assistant", it)) }
@@ -146,20 +149,24 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
             },
             onStatus = { status = it },
         )
-        val c = AudioCapture(
-            onChunk = { bytes ->
-                if (active) {
-                    // Send the mic only once the greeting is done and the agent is quiet;
-                    // otherwise send silence so the agent can't hear itself.
-                    val quiet = SystemClock.uptimeMillis() - lastAgentAudioMs.get() > AGENT_TAIL_MS
-                    val allowMic = greetingDone.get() && quiet
-                    agent.send(if (allowMic) bytes else ByteArray(bytes.size))
-                }
-            },
-            source = android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            echoCancel = true,
-        )
-        if (!c.start()) status = "Microphone unavailable" else capture = c
+        if (autoCaller) {
+            status = "AI caller (LLM)"
+        } else {
+            val c = AudioCapture(
+                onChunk = { bytes ->
+                    if (active) {
+                        // Send the mic only once the greeting is done and the agent is quiet;
+                        // otherwise send silence so the agent can't hear itself.
+                        val quiet = SystemClock.uptimeMillis() - lastAgentAudioMs.get() > AGENT_TAIL_MS
+                        val allowMic = greetingDone.get() && quiet
+                        agent.send(if (allowMic) bytes else ByteArray(bytes.size))
+                    }
+                },
+                source = android.media.MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                echoCancel = true,
+            )
+            if (!c.start()) status = "Microphone unavailable" else capture = c
+        }
     }
 
     LaunchedEffect(active) {
@@ -234,14 +241,29 @@ fun Simulated911Screen(vm: AssessmentViewModel, nav: NavController) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (!mic.granted) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("AI caller")
+                        Text(
+                            "An LLM answers the dispatcher using the report (no mic needed).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = autoCaller, onCheckedChange = { autoCaller = it })
+                }
+                if (!autoCaller && !mic.granted) {
                     Button(onClick = mic.request, modifier = Modifier.fillMaxWidth()) {
                         Text("Grant microphone access")
                     }
                 }
                 Button(
                     onClick = { startCall() },
-                    enabled = mic.granted,
+                    enabled = autoCaller || mic.granted,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Start simulated call") }
             } else {

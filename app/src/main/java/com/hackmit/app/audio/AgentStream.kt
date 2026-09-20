@@ -45,6 +45,7 @@ class AgentStream(
 
     fun start(
         context: Map<String, String>,
+        auto: Boolean = false,
         onEvent: (AgentEvent) -> Unit,
         onAudio: (ByteArray) -> Unit,
         onStatus: (String) -> Unit,
@@ -59,6 +60,7 @@ class AgentStream(
             val wsBase = base.replace("https://", "wss://").replace("http://", "ws://")
             val query = buildString {
                 append("?token=").append(enc(cfg.gatewayToken))
+                if (auto) append("&auto=1")
                 context.forEach { (k, v) -> append("&").append(k).append("=").append(enc(v)) }
             }
             val request = Request.Builder().url("$wsBase/v1/agent/stream$query").build()

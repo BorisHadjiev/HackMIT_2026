@@ -16,6 +16,28 @@ interface AlertGateway {
 }
 
 /**
+ * Normalizes arbitrary user input into a sendable E.164 number.
+ *
+ * - strips spaces, dashes, parentheses, dots
+ * - keeps a leading '+'
+ * - converts the international "00" prefix to '+'
+ * - assumes a 10-digit US number is local and prepends +1
+ * Returns the input unchanged when nothing usable is left.
+ */
+fun normalizeE164(raw: String): String {
+    val cleaned = raw.trim().replace(Regex("[^0-9+]"), "")
+    if (cleaned.isEmpty()) return raw.trim()
+    if (cleaned.startsWith("+")) return cleaned
+    val digits = if (cleaned.startsWith("00")) cleaned.substring(2) else cleaned
+    return when {
+        digits.length == 10 -> "+1$digits"
+        digits.length == 11 && digits.startsWith("1") -> "+$digits"
+        digits.isNotEmpty() -> "+$digits"
+        else -> raw.trim()
+    }
+}
+
+/**
  * Posts a stable, idempotent alert envelope to an app-owned backend.
  *
  * The backend should authenticate the app/user, enforce a trusted-contact allowlist,
@@ -53,7 +75,7 @@ class LinqAlertGateway(
                     put("created_at_ms", draft.createdAtMs)
                     put("recipient", JSONObject().apply {
                         put("name", config.trustedContactName)
-                        put("phone", config.trustedContactPhone)
+                        put("phone", normalizeE164(config.trustedContactPhone))
                     })
                 }
                 val request = Request.Builder()

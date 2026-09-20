@@ -26,10 +26,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.hackmit.app.audio.AudioCapture
+import com.hackmit.app.audio.SlurServer
 import com.hackmit.app.audio.Speaker
+import com.hackmit.app.audio.Wav
 import com.hackmit.app.domain.AlertLevel
 import com.hackmit.app.ui.AssessmentViewModel
 import com.hackmit.app.ui.Routes
@@ -64,6 +67,9 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
     var calibMessage by remember { mutableStateOf<String?>(null) }
     var enrolling by remember { mutableStateOf(false) }
     var enrollMessage by remember { mutableStateOf<String?>(null) }
+    var aiTestBusy by remember { mutableStateOf(false) }
+    var aiTestScore by remember { mutableStateOf<Float?>(null) }
+    var aiTestMessage by remember { mutableStateOf<String?>(null) }
 
     ScreenScaffold(title = "Continuous monitoring", onBack = { nav.popBackStack() }) { padding ->
         Column(
@@ -192,6 +198,57 @@ fun SpeechMonitorScreen(vm: AssessmentViewModel, nav: NavController) {
                         Text(if (enrolling) "Enrolling\u2026 speak now" else "Enroll my voice (6s)")
                     }
                     enrollMessage?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("AI slur test (your voice)", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Records 4 seconds and sends it to the gx10 WavLM classifier for a " +
+                            "population slur score — no calibration needed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(
+                        enabled = micPermission.granted && !aiTestBusy,
+                        onClick = {
+                            scope.launch {
+                                aiTestBusy = true
+                                aiTestScore = null
+                                aiTestMessage = null
+                                val pcm = ByteArrayOutputStream()
+                                val capture = AudioCapture { pcm.write(it) }
+                                if (!capture.start()) {
+                                    aiTestMessage = "Microphone unavailable"
+                                } else {
+                                    delay(4000)
+                                    capture.stop()
+                                    val wav = Wav.wrapPcm16(pcm.toByteArray())
+                                    aiTestScore = SlurServer.analyze(vm.settingsStore, wav)
+                                    if (aiTestScore == null) aiTestMessage = "Could not reach the AI server."
+                                }
+                                aiTestBusy = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(if (aiTestBusy) "Recording\u2026 speak now" else "Record 4s + AI score")
+                    }
+                    aiTestScore?.let { s ->
+                        InfoRow("AI score", "${(s * 100).toInt()}%")
+                        InfoRow(
+                            "Verdict",
+                            if (s >= 0.9447f) "Slurred" else "Clear",
+                            valueColor = if (s >= 0.9447f) severityColor(1f) else Color(0xFF2E7D32),
+                        )
+                    }
+                    aiTestMessage?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall)
                     }
                 }

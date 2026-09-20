@@ -14,11 +14,12 @@ from urllib.parse import urlencode
 import httpx
 import numpy as np
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from websockets.asyncio.client import connect as ws_connect
 from websockets.exceptions import ConnectionClosed
 
 from .agent import AgentClient
+from .agent_voice import build_settings
 from .asr import Asr
 from .config import Settings, get_settings
 from .database import Database
@@ -469,6 +470,32 @@ async def asr_transcribe(
     return await request.app.state.asr.transcribe(body, request.app.state.http)
 
 
+@app.post("/v1/llm/chat/completions")
+async def llm_chat_completions(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> StreamingResponse:
+    """OpenAI-compatible passthrough to local Ollama — the BYO LLM for the voice agent."""
+    settings: Settings = request.app.state.settings
+    if not settings.agent_enabled or not settings.agent_llm_secret:
+        raise HTTPException(status_code=404, detail="voice agent disabled")
+    provided = (authorization or "").removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(provided, settings.agent_llm_secret):
+        raise HTTPException(status_code=401, detail="invalid llm token")
+    body = await request.body()
+    upstream = f"{settings.ollama_url.rstrip('/')}/v1/chat/completions"
+
+    async def stream():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
+            async with client.stream(
+                "POST", upstream, content=body, headers={"Content-Type": "application/json"}
+            ) as resp:
+                async for chunk in resp.aiter_raw():
+                    yield chunk
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
 @app.get("/v1/linq/status")
 async def linq_status(request: Request, x_alert_gateway_token: str | None = Header(default=None)) -> dict:
     settings: Settings = request.app.state.settings
@@ -577,6 +604,91 @@ async def deepgram_proxy(websocket: WebSocket) -> None:
         pass
     except Exception as exc:
         log.warning("deepgram proxy ended: %s", exc)
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+@app.websocket("/v1/agent/stream")
+async def agent_stream(websocket: WebSocket) -> None:
+    """Proxy the app to Deepgram's Voice Agent API with a server-side simulated-911 config.
+
+    The Settings message (prompt, greeting, models, BYO-LLM endpoint) is injected here so
+    the prompt and keys never ship in the APK. This is an in-app simulation: no telephony.
+    """
+    settings: Settings = websocket.app.state.settings
+    if not settings.agent_enabled or not settings.deepgram_configured:
+        await websocket.close(code=4403, reason="voice agent not configured")
+        return
+
+    token = websocket.headers.get("Authorization")
+    if token and token.lower().startswith("token "):
+        token = token[6:].strip()
+    if token is None:
+        token = websocket.query_params.get("token")
+    if settings.gateway_token and (not token or not hmac.compare_digest(token, settings.gateway_token)):
+        await websocket.close(code=4401, reason="unauthorized")
+        return
+
+    context: dict = {}
+    for key in ("p_stroke", "severity", "action", "onset_minutes"):
+        val = websocket.query_params.get(key)
+        if val not in (None, ""):
+            context[key] = val
+    signs = websocket.query_params.get("signs")
+    if signs:
+        context["signs"] = [s for s in signs.split(",") if s]
+
+    await websocket.accept()
+    try:
+        async with ws_connect(
+            settings.agent_url,
+            additional_headers={"Authorization": f"Token {settings.deepgram_api_key}"},
+            open_timeout=15,
+        ) as dg:
+            await dg.send(json.dumps(build_settings(settings, context)))
+            log.info("agent stream: settings sent (llm=%s voice=%s)", settings.agent_llm_model, settings.agent_voice)
+
+            async def client_to_dg() -> None:
+                try:
+                    while True:
+                        msg = await websocket.receive()
+                        if msg.get("type") == "websocket.disconnect":
+                            try:
+                                await dg.close()
+                            except Exception:
+                                pass
+                            return
+                        data = msg.get("bytes")
+                        if data is not None:
+                            await dg.send(data)
+                        # Client text is ignored so the server-side prompt stays authoritative.
+                except Exception:
+                    return
+
+            async def dg_to_client() -> None:
+                try:
+                    async for msg in dg:
+                        if isinstance(msg, str):
+                            await websocket.send_text(msg)
+                        else:
+                            await websocket.send_bytes(msg)
+                except Exception:
+                    return
+
+            client_task = asyncio.create_task(client_to_dg())
+            upstream_task = asyncio.create_task(dg_to_client())
+            done, pending = await asyncio.wait(
+                {client_task, upstream_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+    except ConnectionClosed:
+        pass
+    except Exception as exc:
+        log.warning("agent proxy ended: %s", exc)
     finally:
         try:
             await websocket.close()

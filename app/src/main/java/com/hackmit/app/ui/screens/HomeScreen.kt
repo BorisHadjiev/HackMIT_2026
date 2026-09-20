@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
@@ -111,6 +112,13 @@ fun HomeScreen(vm: AssessmentViewModel, nav: NavController) {
                 score = null,
                 icon = Icons.Filled.PlayArrow,
                 onClick = { nav.navigate(Routes.SLUR_DEMO) },
+            )
+            ModuleCard(
+                title = "Simulated 911 call",
+                subtitle = "Practice reporting with a voice dispatcher (demo, no call placed)",
+                score = null,
+                icon = Icons.Filled.Phone,
+                onClick = { nav.navigate(Routes.SIMULATED_911) },
             )
 
             Spacer(Modifier.padding(top = 4.dp))

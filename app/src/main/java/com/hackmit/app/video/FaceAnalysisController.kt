@@ -32,6 +32,10 @@ class FaceAnalysisController(
     @Volatile
     private var lastUpload = 0L
 
+    // Temporal smoothing: the raw LR probability jitters frame-to-frame.
+    private var smoothed = 0f
+    private val smoothAlpha = 0.35f
+
     /** Warms the connection so the UI flips to "connected" before the first frame. */
     fun warmUp() {
         scope.launch {
@@ -53,7 +57,13 @@ class FaceAnalysisController(
             val result = if (jpeg != null) FaceServer.analyze(settings, jpeg) else null
             if (result != null) {
                 serverOk = true
-                frame.value = result
+                if (result.detected) {
+                    smoothed = smoothAlpha * result.asymmetry + (1 - smoothAlpha) * smoothed
+                    frame.value = result.copy(asymmetry = smoothed)
+                } else {
+                    // Keep the last smoothed value during blinks/face loss.
+                    frame.value = FaceFrame(false, smoothed, 0f, 0f)
+                }
             }
             inFlight = false
         }
